@@ -17,11 +17,12 @@ use Data::Dumper;
 use POSIX qw(strftime);
 use File::Copy;
 use IO::Handle;
+use Text::ParseWords;
 
 $File::Find::dont_use_nlink = 1; # Incase this is smbfs or whatever
 
 my %BANDS;
-my $progname = basename $0;
+(my $progname = basename $0) =~ s/\.pl$//;
 my $version = '$Revision$ ';
 $version =~ s/^.Revision:\s+//; $version =~ s/\s*\$\s*$//;
 my $debug = 0;
@@ -35,6 +36,11 @@ my $target = ".";
 my $test = 0;
 my $help = 0;
 my %OUTPUT;
+my $rcfile = "$ENV{HOME}/.${progname}rc";
+
+# ActiveState just can't get the job done.
+die "ActiveState Perl not supported; install Cygwin (http://www.cygwin.com)\n"
+  if $^O =~ /MSWin32/;
 
 format STDOUT_TOP =
 +-----------------------------------------------------------------------------+
@@ -704,6 +710,12 @@ EOF
    ;
 }
 
+if (-f $rcfile and open (RCFILE, $rcfile)) {
+   local $/ = 0;		# Slup the whole file
+   unshift (@ARGV, shellwords (<RCFILE>));
+   close RCFILE;
+}
+
 my $retval = GetOptions ("lame=s" => \$lame,
 			 "lameopts=s" => \$lameopts,
 			 "b|bitrate=i" => \$bitrate,
@@ -717,7 +729,7 @@ my $retval = GetOptions ("lame=s" => \$lame,
 			 "help!" => sub { usage; exit (0); },
 			 "version!" => sub { version; exit (0); });
 
-if ($retval == 0 or $help) {
+if ($retval == 0 or $help or not scalar @ARGV) {
    usage;
    exit (not $help);
 }
@@ -790,17 +802,20 @@ sub shn_to_mp3 {
    my $tracktime = $info->{"Songs"}{$index}{"Time"} || "0:00";
    my $tracksecs = parsetime ($tracktime);
 
-   my $cmd = "shorten -x " . quotemeta ($file) . " - | " .
-     "$lame -b $bitrate -q $quality --add-id3v2" .
-       " --tt " . quotemeta ($title) .
-	 " --ta " . quotemeta ($artist) .
-	   " --tl " . quotemeta ($album) .
-	     " --tc " . quotemeta ($comment) .
-	       " --ty " . int ($year) .
-		 " --tn " . int ($track) .
-		   (defined $lameopts ? " $lameopts" : "") .
-		     " - " . quotemeta ($mp3file) .
-		       ($debug ? "" : " > /dev/null 2>&1");
+   my $cmd = "shorten -x " . quotemeta ($file) . " - | $lame " .
+     # For some reason which is not obvious, lame requires the input
+     # to be byte-swapped when running in a pipeline on Windows.
+     ($^O eq "cygwin" ? "-x " : "") .
+       "-b $bitrate -q $quality --add-id3v2" .
+	 " --tt " . quotemeta ($title) .
+	   " --ta " . quotemeta ($artist) .
+	     " --tl " . quotemeta ($album) .
+	       " --tc " . quotemeta ($comment) .
+		 " --ty " . int ($year) .
+		   " --tn " . int ($track) .
+		     (defined $lameopts ? " $lameopts" : "") .
+		       " - " . quotemeta ($mp3file) .
+			 ($debug ? "" : " > /dev/null 2>&1");
 
    my $skip = (-f $mp3file and -M $mp3file < -M $file and not $force);
 
@@ -855,8 +870,6 @@ sub shn_to_mp3 {
       write;
    }
 }
-
-push (@ARGV, ".") unless scalar @ARGV;
 
 foreach my $dir (@ARGV) {
    my %INFO;
