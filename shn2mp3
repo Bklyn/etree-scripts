@@ -36,7 +36,8 @@ my $writefiles = 0;
 my $force = 0;
 my $encoderopts = "";
 my $bitrate = 192;
-my $quality = 2;
+my $quality = 3;
+my $preset = "standard";
 my $target = ".";
 my $test = 0;
 my $help = 0;
@@ -48,13 +49,16 @@ my %DECODER = ( "shn" => "shorten -x %FILE% -",
 		"mp3" => "mpg123 -q -s %FILE%",
 		"ogg" => "oggdec -q -o - %FILE%");
 
-my %ENCODER = ( "mp3" => ("lame -b %BITRATE% -q %QUALITY% --add-id3v2 " .
+my %ENCODER = ( "mp3" => ("lame " .
+			  "--alt-preset %PRESET% " .
+			  "--add-id3v2 " .
 			  "--ta %ARTIST% --tl %ALBUM% --tt %TITLE% " .
 			  "--tc %COMMENT% --ty %YEAR% --tn %TRACK% " .
 			  "%ENCODEROPTS% - %OUTFILE%" ),
 		"ogg" => ("oggenc -b %BITRATE% -q %QUALITY% " .
 			  "-a %ARTIST% -l %ALBUM% -t %TITLE% -N %TRACK% " .
-			  "-c %COMMENT% -o %OUTFILE% %ENCODEROPTS% -")
+			  "-c %COMMENT% -d %YEAR% " .
+			  "-o %OUTFILE% %ENCODEROPTS% -")
 	      );
 
 # ActiveState just can't get the job done.
@@ -723,10 +727,11 @@ Usage: $0 [options] path-to-shns
 
 Options:
   --encoder-options "x" Additional arguments to pass to the \U$output_type\E encoder.
-  -b | --bitrate b      Specify bit-rate of output files.  Default is $bitrate.
-  -q | --quality q      Set encoding "quality".  Best is 0, worst is 9.
-  -h | --high-quality   Equivalent to --quality 2 in LAME, 7 in oggenc.
-  -f | --fast           Equivalent to --quality 7 in LAME, 2 in oggenc.
+  -b | --bitrate b      Specify bit-rate of output files for oggenc.
+                        Default is $bitrate.
+  -q | --quality q      Set oggenc encoding quality.  Worst is 0, best is 10.
+                        Default is 3.
+  --preset p            Specify LAME encoder preset.  Default is $preset.
   --target t            Root directory where MP3s will be written.  Default is
                         the current working directory.
   --force               Force overwriting of existing MP3s.
@@ -747,6 +752,7 @@ if (-f $rcfile and open (RCFILE, $rcfile)) {
 my $retval = GetOptions ("lameopts=s" => \$encoderopts,
 			 "encoder-options=s" => \$encoderopts,
 			 "b|bitrate=i" => \$bitrate,
+			 "preset=s" => \$preset,
 			 "target=s" => \$target,
 			 "test!" => \$test,
 			 "q|quality=i" => \$quality,
@@ -862,10 +868,11 @@ sub shn_to_lossy {
    } elsif ($quality eq "high") {
       $quality = $output_type eq "mp3" ? 2 : 7;
    }
-   
+
    $decoder =~ s/%FILE%/\Q$file\E/g;
    $encoder =~ s/%BITRATE%/$bitrate/g;
    $encoder =~ s/%QUALITY%/$quality/g;
+   $encoder =~ s/%PRESET%/$preset/g;
    $encoder =~ s/%ARTIST%/\Q$artist\E/g;
    $encoder =~ s/%ALBUM%/\Q$album\E/g;
    $encoder =~ s/%TITLE%/\Q$title\E/g;
