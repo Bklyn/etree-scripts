@@ -1,4 +1,4 @@
-etree-scripts (2.1-2) unstable; urgency=low
+etree-scripts (2.2-1) unstable; urgency=low
 
   * Fixed a bug in md5check; when checking a .md5 or .txt file, chdir to
     its directory so relative paths work properly.
