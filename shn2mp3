@@ -16,13 +16,13 @@
 use strict;
 use Getopt::Long;
 use File::Basename;
+use File::Spec;
 use File::Find;
 use Data::Dumper;
 use POSIX qw(strftime);
 use File::Copy;
 use IO::Handle;
 use Text::ParseWords;
-use Cwd 'abs_path';
 use lib dirname $0;
 use Etree::InfoFile;
 
@@ -42,7 +42,7 @@ my $bitrate = 192;
 my $quality = 3;
 my $preset;
 my $altpreset = "standard";
-my $target = ".";
+my $target = File::Spec->rel2abs (".");
 my $test = 0;
 my %OUTPUT;
 my $rcfile = "$ENV{HOME}/.${progname}rc";
@@ -313,7 +313,13 @@ sub mkdir_p {
 
 sub outputdir {
    my $dir = shift;
-   my $outputdir = "$target/" . basename ($dir);
+
+   # On Cygwin, LAME might not be compiled w/Cygwin and as such might
+   # not work with paths like /c/mp3 etc.  Use a relative path
+   # instead.
+   my $outputdir =
+     ($^O eq "cygwin" ? File::Spec->abs2rel ($target) : $target) .
+       "/" . basename ($dir);
    $outputdir =~ s/(\.(shnf?|flac\d{0,2}f?|oggf?|mp3f?))?$/.${output_type}f/i;
    $outputdir;
 }
@@ -454,9 +460,7 @@ sub lossless_to_lossy {
    1;
 }
 
-foreach my $dir (@ARGV) {
-   $dir = abs_path ($dir);	# Convert to an absolute path
-
+foreach my $dir (map { File::Spec->rel2abs ($_) } @ARGV) {
    if (not -d $dir) {
       warn "$dir: not a directory\n";
       next;
@@ -492,7 +496,7 @@ foreach my $dir (@ARGV) {
    my @SONGS = $info->songs;
 
    if (scalar @FILES > scalar @SONGS) {
-      print "Number of songs parsed from info file (" . scalar (@SONGS) .
+      print "$dir: Number of songs parsed from info file (" . scalar (@SONGS) .
 	") does not match number of lossless audio files (" .
 	  scalar (@FILES) . ").  Please correct the info file.\n";
       next;
