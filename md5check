@@ -56,7 +56,7 @@ sub check_md5 {
 sub check_ffp {
    my ($file, $sum) = @_;
 
-   open (METAFLAC, "metaflac --show-md5sum $file|") or return 1;
+   open (METAFLAC, "metaflac --show-md5sum \Q$file\E|") or return 1;
    my $hexdigest = <METAFLAC>;
    close METAFLAC;
    chomp $hexdigest;
