@@ -336,9 +336,7 @@ sub tag_files {
 # Operate on CWD if nothing is specified
 if (not scalar @ARGV) { push (@ARGV, "."); }
 
-foreach my $dir (@ARGV) {
-   $dir = File::Spec->rel2abs ($dir);
-
+foreach my $dir (map { File::Spec->rel2abs ($_) } @ARGV) {
    if (not -d $dir) {
       warn "$dir: not a directory\n";
       next;
