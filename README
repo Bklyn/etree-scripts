@@ -5,12 +5,9 @@
  \___|\__|_|  \___|\___|     |___/\___|_|  |_| .__/ \__|___/ |_____(_)___/ 
                                              |_|                           
 
-URL: http://etree.org/software/etree-scripts-2.0.tar.gz
-
-Announcing release 2.0 of etree-scripts.  etree-scripts is a set
-of (mostly) Perl scripts of use to those lossless audio freaks like
-myself who prefer to work from the command line.  I know there are
-others out there :-)
+Announcing release 2.0 of etree-scripts, a set of (mostly) Perl
+scripts that is of use to those lossless audio freaks (like myself)
+who prefer to work from the command line.
 
 Some important changes in this long overdue release:
 
@@ -18,18 +15,21 @@ Some important changes in this long overdue release:
   files to well-tagged, CD sector-aligned FLAC files.  Run on existing
   FLAC files, it adds/updates tags based on the show's info file.
   Seeders can use it to do their WAV > FLAC encoding and get tagging
-  in the bargain.  FLAC support is in all of the scripts now.
+  in the bargain.
+
+* FLAC support is in all of the scripts now, even though their names
+  might be "unshn" or "shn2mp3".
 
 * Modularized the info parsing code that is the core of flacify,
   shn2mp3 and makehbx into a new Perl module called Etree::InfoFile.
-  The parsing has been improved a great deal from the last official
+  The parsing has been improved a great deal from the last offical
   release (1.4) and I hope others can make use of it.
 
 * Added documentation to most of the scripts, resulting in
-  new man pages and more detailed help messages.
+  man pages, and more detailed online help.
 
-* Now uses Perl's powerful Makefile.PL.  Simple installation (perl
-  Makefile.PL; make; make install), better checking for dependencies,
+* Uses Perl's powerful Makefile.PL.  Simple installation (perl
+  Makefile.PL; make; make install), better checking of dependencies,
   and numerous options for power users.  Debian packages also
   available.
 
@@ -37,10 +37,12 @@ Some important changes in this long overdue release:
   anywhere else Perl and the lossless encoders (shorten, flac) have
   been ported.
 
+Dist File: http://bklyn.org/~cae/etree-scripts-2.0.tar.gz
+	   http://etree.org/software/etree-scripts-2.0.tar.gz
 
 Home Page: http://sf.net/projects/etree-scripts/
-Tar File : http://etree.org/software/etree-scripts-2.0.tar.gz
 
+Apt-Get:   deb http://etree.org/debian unstable contrib
 
  _     _   _             ____
 | |__ | |_| |_ _ __ _   / / / wiki.etree.org
