@@ -466,6 +466,8 @@ foreach my $dir (@ARGV) {
 
    $info->parse;
 
+   chdir ($dir) or die "Couldn't change directory to $dir: $!\n";
+
    print "Etree::InfoFile dump:\n", Dumper ($info), "\n" if $debug;
 
    %OUTPUT = %$info;
