@@ -26,6 +26,15 @@ my %EXES = ("unshn" => undef,
 	    "flac" => undef,
 	    "metaflac" => undef);
 
+# On Windows, add the FLAC install dir to the PATH
+if ($^O eq "MSWin32") {		# Active State
+   $ENV{"PATH"} .= ';c:\Program Files\FLAC'
+     if -d 'c:\Program Files\FLAC';
+} elsif ($^O eq "cygwin") {	# Cygwin
+   $ENV{"PATH"} .= ':/c/Program Files/FLAC'
+     if -d '/c/Program Files/FLAC';
+}
+
 # Ensure all the binaries we need are in our PATH
 foreach my $exe (keys %EXES) {
    $EXES{$exe} = findexe ($exe)
@@ -144,18 +153,24 @@ sub convert_files {
       my %GROUPS;
       my $groupby = "Set";
 
-      map { my $set = $_->{Set} || 0;
-	    $GROUPS{$set}->{$_->{Index}} = $_; } @$songs;
+      map { if (defined) {
+	 my $set = $_->{Set} || 0;
+	 $GROUPS{$set}->{$_->{Index}} = $_; } } @$songs;
 
       # If we dopn't have any set info, group files by disc instead
-      if (scalar keys %GROUPS == 1 and exists $GROUPS{0}) {
+      if (scalar keys %GROUPS <= 1 and exists $GROUPS{0}) {
 	 print "No set information.  Grouping by disc.\n";
 	 undef %GROUPS;
 	 $groupby = "Disc";
 	 foreach my $disc (1 .. $info->num_discs) {
 	    map { $GROUPS{$disc}{$_->{Index}} = $_ }
-	      grep { $_->{Disc} == $disc } @$songs;
+	      grep { defined and $_->{Disc} == $disc } @$songs;
 	 }
+      }
+
+      if (not scalar keys %GROUPS) {
+	 $groupby = "Files";
+	 map { $GROUPS{1}{$_} = undef; } 0 .. $#$files;
       }
 
       print "Groups (by $groupby):\n", Dumper (\%GROUPS) if $debug;
@@ -168,16 +183,6 @@ sub convert_files {
 	 my @BATCH = keys %{$GROUPS{$group}};
 	 # Map from index -> group
 	 map { $INDEX_GROUP{$_} = $group } @BATCH;
-      }
-
-      # Ensure that the number of file indexes in the %INDEX_GROUP hash
-      # matches the total number of files to process
-      if (0 and scalar keys %INDEX_GROUP != scalar @WAVS) {
-	 die "Logic Error: file batching created " .
-	   scalar (keys %GROUPS) . " file groups " .
-	     "comprising " . scalar (keys %INDEX_GROUP) .
-	       " files, but there are " . scalar (@WAVS) .
-		 " files to process\n";
       }
 
       foreach my $group (sort setlist_order keys (%GROUPS)) {
@@ -277,8 +282,8 @@ sub tag_files {
    $TAGS{"LOCATION"} = $info->venue if $info->venue;
    $TAGS{"SOURCEMEDIA"} = $info->source if $info->source;
 
-   foreach my $index (0 .. $#$songs) {
-      my $song = $songs->[$index];
+   foreach my $index (0 .. $#$files) {
+      my $song = ref ($songs) ? $songs->[$index] : undef;
       delete $TAGS{"DISCNUMBER"};
       delete $TAGS{"TRACKNUMBER"};
       delete $TAGS{"TITLE"};
@@ -288,7 +293,7 @@ sub tag_files {
       # TRACKNUMBER.  Not all applications/devices honor the
       # DISCNUMBER tag though, so this may leave you with all of your
       # Track 1's sorting before all of your Track 2's.
-      if ($tagdiscs) {
+      if (defined $song and $tagdiscs) {
 	 $TAGS{"DISCNUMBER"} = $song->{Disc} if $song->{Disc};
 	 $TAGS{"TRACKNUMBER"} = $song->{Track} || ($index + 1);
       } else {
@@ -296,15 +301,16 @@ sub tag_files {
 	 $TAGS{"TRACKNUMBER"} = $index + 1;
       }
 
-      $TAGS{"TITLE"} = $song->{Title} if $song->{Title};
+      $TAGS{"TITLE"} = $song->{Title} if defined $song and $song->{Title};
 
-      my $note = $song->{Notes};
+      my $note;
+      $note = $song->{Notes} if defined $song and exists $song->{Notes};
 
       if (defined $note and exists $info->{Notes}{$note}) {
 	 $TAGS{"COMMENT"} = $info->{Notes}{$note};
       }
 
-      print "" . sprintf ("%2d/%2d", $index + 1, $#$songs + 1) . ": " .
+      print "" . sprintf ("%2d/%2d", $index + 1, $#$files + 1) . ": " .
 	($TAGS{TITLE} || "") .
 	  (exists $TAGS{COMMENT} ? " ($TAGS{COMMENT})" : "") . "\n";
 
@@ -362,7 +368,7 @@ foreach my $dir (@ARGV) {
 
    my @SONGS = $info->songs;
 
-   if (scalar @SONGS < scalar @FILES) {
+   if (scalar @SONGS and scalar @SONGS < scalar @FILES) {
       print "Number of songs from info file (" . scalar (@SONGS) .
 	") doesn't match number of audio files (" . scalar (@FILES) . "):\n";
       print "Songs: ", join (", ", map { $_->{Title} } @SONGS), "\n",
