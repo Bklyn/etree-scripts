@@ -4,6 +4,28 @@
 #
 # $Id$
 
+
+=head1 NAME
+
+  Etree::InfoFile - Parse live concert recording "info" files and
+  possibly associate the information with lossless audio files.
+
+=head1 SYNOPSIS
+
+    my $dir = "/shn/ph2003-01-01.flac16";
+
+    my $info = new Etree::InfoFile (Directory => $dir)
+        or die "Unable to create Etree::InfoFile object";
+
+    $info->parse or warn "Unable to handle $dir";
+
+    print "Artist: " . $info->artist . "\n" .
+  	  "  Date: " . $info->date . "\n" .
+          " Venue: " . $info->venue . "\n" .
+          "Source: " . $info->source . "\n";
+
+=cut
+
 package Etree::InfoFile;
 
 use strict;
@@ -53,12 +75,29 @@ my $states = qr/A[BLKZR]|BC|CA|CO|CT|DE|FL|GA|HI|I[DLNA]|KS|KY|LA|M[ABEDINSOT]|
   N[BCDEFVHJMSY]|O[HKNR]|P[AQ]|PEI|QC|RI|S[CDK]|TN|TX|UT|VT|VA|W[AVIY]|DC/x;
 my $countries = join ("|", map { qq/$_/ } all_country_names);
 $countries = qr($countries);
+my $trackre = qr/^\s*(?:d\d+)?t?(\d+) 	# sometimes you see d<n>t<m>
+  \s* (?:[[:punct:]]+)? 		# whitespace, some punctuation
+  \s* (.*)/ix;				# whitespace, the track title
 
 # A regex that matches most dates
 my $datefmt = qr/\d{4}[-\.\/]\d{1,2}[-\.\/]\d{1,2}|
 		 \d{1,2}[-\.\/]\d{1,2}[-\.\/]\d{2,4}|
 		 (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*
 		 \s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{2,4}/ix;
+
+=head1 METHODS
+
+These methods may be invoked on an instance of the class:
+
+=over
+
+=item new
+
+Constructor.  Takes a parameter hash.  Should be called with
+"Directory" => C<somedir> where C<somedir> is the directory you wish
+to process.
+
+=cut
 
 sub new {
    my $type = shift;
@@ -89,11 +128,13 @@ sub findfiles {
 
    # Find all of the files in this directory and group them by their
    # filename extension as well as their full path
-   find (sub { return unless -f $_;
+   find (sub { return unless -f;
 	       my $ext = extension ($_);
 	       return unless defined $ext;
-	       $self->{"Files"}{$_} = { "ext" => lc $ext, "size" => -s $_ };
-	       $self->{"ByExt"}{lc $ext}{$_} = 1;
+	       my $file = File::Spec->abs2rel ($File::Find::name,
+					       $dir);
+	       $self->{"Files"}{$file} = { "ext" => lc $ext, "size" => -s $_ };
+	       $self->{"ByExt"}{lc $ext}{$file} = 1;
 	    }, $dir);
 }
 
@@ -157,7 +198,7 @@ sub readtext {
 	    $infofile = $NFO[0];
 	 } else {
 	    # Try and find best matching filename
-	    (my $base = basename ($dir)) =~ s/\.(shn|ogg|flac\d*)f?$//;
+	    (my $base = basename ($dir)) =~ s/(shn|ogg|flac\d*)f?$//;
 	    my @BEST;
 	    my $score = 0;
 
@@ -265,7 +306,13 @@ sub word2num {
    return $WORD2NUM{lc $word};
 }
 
-# parseinfo - parse the info file contents for disc numbers and track names
+=item parseinfo
+
+Internal method used to parse the info file contents for disc numbers
+and track names.  Should not be called directly.
+
+=cut
+
 sub parseinfo {
    my $self = shift;
 
@@ -327,17 +374,15 @@ sub parseinfo {
 	 $discnum = word2num ($2);
 	 $indisc = $discnum;
 	 $lastsong = 0;
-      } elsif ($line =~ /\bset\s*(\d+|$numberwords)\b/ix) {
+      } elsif ($line =~ /\bset\s*(\d+|$numberwords)\b/ix
+	       and $line !~ $trackre) {
 	 $set = word2num ($1);
       } elsif ($line =~ /^encore/i) {
 	 $set = "E";
       } elsif ($line =~ /^(\d+)\s*(cd|dis[ck])s?/ix) {
 	 $self->{"Discs"} = $1;
       } elsif (not $haveall and
-	       $line =~ /^(?:d\d+)?t?(\d+) 	# sometimes you see d<n>t<m>
-	       \s* (?:[[:punct:]]+)? 		# whitespace, some punctuation
-	       (.*)/x				# the track title
-	       and int ($1) > 0) {
+	       $line =~ $trackre and int ($1) > 0) {
 	 my $songnum = int $1;
 	 my ($title, $segue, $notes, $runtime, $maybeset) = parsetitle ($2);
 	 $set = $maybeset if defined $maybeset;
@@ -532,7 +577,15 @@ sub _wrap {
    $value;
 }
 
+=item artist
+
+Return the artist information that was parsed.  This is usually just
+the first line from the info file.
+
+=cut
+
 sub artist { my $self = shift; $self->_wrap ("Band"); }
+
 sub date { my $self = shift; $self->_wrap ("CanonicalDate", "Date"); }
 sub year { my $self = shift; my $cd = $self->_wrap ("CanonicalDate");
 	   if (defined $cd) { return substr ($cd, 0, 4) }
@@ -591,6 +644,13 @@ sub files {
    return %{$self->{Files}};
 }
 
+=item parse
+
+User entry point to the parsing code.  Should be called before any of
+the data access mehtods.
+
+=cut
+
 sub parse {
    my $self = shift;
    my $infofile = shift;
@@ -600,3 +660,23 @@ sub parse {
 }
 
 1;
+
+__END__
+
+=back
+
+=head1 VERSION
+
+$Id$
+
+=head1 SEE ALSO
+
+L<flacify>, L<makehbx>, L<shn2mp3>, L<http://etree.org/>
+
+=head1 AUTHOR
+
+Caleb Epstein E<lt>cae at bklyn dot orgE<gt>
+
+=cut
+
+
