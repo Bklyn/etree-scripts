@@ -17,6 +17,10 @@ WriteMakefile (
 			      "cdfill", "makehbx", "shn2mp3", "shn2ogg",
 			      "make-toc", "flacify" ],
 
+	       PREREQ_PM => { "Date::Parse" => 0,
+			      "HTML::Entities" => 0,
+			      "Digest::MD5" => 0 },
+
 	       PM => { "Etree/InfoFile.pm" =>
 		       '$(INST_LIBDIR)/Etree/InfoFile.pm' },
 	      );
