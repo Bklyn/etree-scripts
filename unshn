@@ -97,8 +97,8 @@ push (@ARGV, ".") unless scalar @ARGV;
 
 foreach my $arg (@ARGV) {
    sub wanted {
+      return unless -f;
       my $file = $File::Find::name;
-      return unless -f $file;
       foreach my $ext (keys %DECODERS) {
 	 if ($file =~ m/\.$ext$/i) {
 	    $FILES{$file} = $ext;
