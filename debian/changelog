@@ -1,3 +1,12 @@
+etree-scripts (1.3-2) unstable; urgency=low
+
+  * makehbx, shn2mp3: Handle YYYY-MM-DD dates.
+  * make-toc: added.
+  * unshn: if shorten is interrupted by ctrl-c, stop processing.
+  * Numerous dependency fixes
+
+ -- Caleb Epstein <cae@bklyn.org>  Fri, 30 Aug 2002 09:33:54 -0400
+
 etree-scripts (1.3-1) unstable; urgency=medium
 
   * Added FLAC functions to md5check and unshn.  Create a symlink called

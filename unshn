@@ -98,6 +98,7 @@ push (@ARGV, ".") unless scalar @ARGV;
 foreach my $arg (@ARGV) {
    sub wanted {
       my $file = $File::Find::name;
+      return unless -f $file;
       foreach my $ext (keys %DECODERS) {
 	 if ($file =~ m/\.$ext$/i) {
 	    $FILES{$file} = $ext;
@@ -120,6 +121,7 @@ my $numfiles = scalar keys %FILES;
 my $index = 0;
 my $status = 0;
 my @SBES;
+my %NOT_CDDA;
 
 foreach my $file (sort keys %FILES) {
    my $ext = $FILES{$file};
@@ -148,6 +150,18 @@ foreach my $file (sort keys %FILES) {
 	       print " *SBE*";
 	       push (@SBES, $wavfile);
 	    }
+	    if ($waveinfo->{"bits_sample"} != 16) {
+	       print " *" . $waveinfo->{"bits_sample"} . " bit*";
+	       $NOT_CDDA{$wavfile} = 1;
+	    }
+	    if ($waveinfo->{"sample_rate"} != 44100) {
+	       print sprintf " *%.1 kHz*", $waveinfo->{"sample_rate"} / 1000;
+	       $NOT_CDDA{$wavfile} = 1;
+	    }
+	    if ($waveinfo->{"channels"} != 2) {
+	       print " *" . $waveinfo->{"channels"} . " channel*";
+	       $NOT_CDDA{$wavfile} = 1;
+	    }
 	 }
       }
       print "\n";
@@ -167,8 +181,15 @@ foreach my $file (sort keys %FILES) {
 	($signal ? " from signal $signal" : "") .
 	  ($cored ? " (dumped core)" : "") . "\n";
 
+      last if $signal == 2;	# If user hit ctrl-c, stop
+
       $status |= 1;
    }
+}
+
+if ($shnlen and scalar keys %WAVFILES) {
+   my @CMD = ("shntool", "len", sort keys %WAVFILES);
+   system (@CMD);
 }
 
 # If we encountered any SBEs, warn the user
@@ -193,6 +214,21 @@ files that make up a disc, not just the one containing the SBE.
 EOF
       ;
    }
+}
+
+if (scalar keys %NOT_CDDA) {
+   my $not_cdda = scalar keys %NOT_CDDA;
+   warn "\nERROR: the following $not_cdda file(s) are not in CD-DA format:\n";
+   warn "\t", join ("\n\t", sort keys %NOT_CDDA), "\n";
+
+   warn <<EOF
+
+These files are not 16-bit, 44.1 kHz stereo PCM data and will either
+not be accepted by your CD burning application or will sound like noise
+when played back on a CD player.
+EOF
+  ;
+   $status |= 1;
 }
 
 # If running in --fix mode, run shntool fix on all the WAV files in the CWD
@@ -242,11 +278,6 @@ if ($shnfix) {
 
       $status |= $exit;
    }
-}
-
-if ($shnlen and scalar keys %WAVFILES) {
-   my @CMD = ("shntool", "len", sort keys %WAVFILES);
-   system (@CMD);
 }
 
 exit $status;

@@ -15,7 +15,6 @@ use File::Find;
 use Date::Parse;
 use Data::Dumper;
 use POSIX qw(strftime);
-use HTML::Entities;		# Some folks might not have this; get it
 use File::Copy;
 use IO::Handle;
 
@@ -91,9 +90,9 @@ my $numberwords = join ("|", keys %WORD2NUM);
 
 # Some regexps we use to recognize certain parts of the text file,
 # mostly taping related
-my $spots = 'fob|dfc|btp|aud|sbd|on(\s*|-)stage|matrix|mix|balcony|rail|stand';
-my $mics = 'caps|cardioid|sc?ho?ep[sz]|neumann|mbho|akg';
-my $cables = 'kc5|actives?|patch(?:ed)?';
+my $spots = 'fob|dfc|btp|d?aud|d?sbd|on(\s*|-)stage|matrix|mix|balcony|rail|stand';
+my $mics = 'caps|omni|cardioid|sc?ho?ep[sz]|neumann|mbho|akg|b&k|dpa|audio.technica';
+my $cables = 'kc5|actives?|patch(?:ed)?|coax|optical';
 my $pres = 'lunatec|apogee|ad1000|ad2k\+?|oade|sonosax|sbm-?1|' .
   'usb-pre|mini[\s-]?me';
 my $dats = 'dat|pcm|d[378]|da20|d10|m1|sv-25[05]|da-?p1|tascam|sony|' .
@@ -112,7 +111,8 @@ my $states = 'A[LKZR]|CA|CO|CT|DE|FL|GA|HI|I[DLNA]|KS|KY|LA|M[AEDINSOT]|' .
 my @AUDIOEXT = ("shn", "mp3", "ogg", "flac");
 
 # A regex that matches most dates
-my $datefmt = '\d{1,2}[-\.\/]\d{1,2}[-\.\/]\d{2,4}|' .
+my $datefmt = '\d{4}[-\.\/]\d{1,2}[-\.\/]\d{1,2}|' .
+  '\d{1,2}[-\.\/]\d{1,2}[-\.\/]\d{2,4}|' .
   '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2},?\s+\d{2,4}';
 
 # extension - get the extension part of a filename
@@ -389,10 +389,10 @@ sub parsetitle {
    $title =~ s/\s*([\*\@\#\$\%\^]+)\s*$/ $notes = $1; "" /e;
 
    # Now strip off any other trailing non-word characters
-   $title =~ s/\W+$//;
+   # $title =~ s/\W+$//;
 
    # remove leading and trailing whitespace
-   $title =~ s/^\s+//; $title =~ s/\s+$//e;
+   $title =~ s/^\s+//; $title =~ s/\s+$//;
 
    # See if there is a set indicator (e.g. I: Song or E: Song)
    if ($title =~ /^($numberwords):\s*(.+)/i) {
@@ -482,6 +482,11 @@ sub parseinfo {
 	 $set = $maybeset if defined $maybeset;
 
 	 my $index = 100 * $discnum + $songnum;
+
+	 # DEBUG
+	 print "Crossed discs: d $discnum t $songnum?\n"
+	   if $songnum < $lastsong and exists $arg->{"Songs"}{$index}
+	     and $debug;
 
 	 $arg->{"Discs"} = $discnum;
 	 $arg->{"Disc"}{$discnum}{"Tracks"} = $songnum;
@@ -855,6 +860,8 @@ push (@ARGV, ".") unless scalar @ARGV;
 
 foreach my $dir (@ARGV) {
    my %INFO;
+   $dir =~ s@/$@@;		# Strip any trailing slash
+
    if (-d $dir) {
       $INFO{"Directory"} = $dir;
    } elsif (-f $dir) {

@@ -1,4 +1,4 @@
-SCRIPTS = md5check unshn burn-shns shn cdfill makehbx shn2mp3
+SCRIPTS = md5check unshn burn-shns shn cdfill makehbx shn2mp3 make-toc
 
 DESTDIR =
 prefix = $(DESTDIR)/usr
