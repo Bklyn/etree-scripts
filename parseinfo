@@ -1,0 +1,28 @@
+#!/usr/bin/perl -w
+
+use strict;
+use Etree::InfoFile;
+use Data::Dumper;
+
+foreach my $dir (@ARGV) {
+   my $info = new InfoFile (Directory => $dir) or die;
+   $info->parse;
+
+   print join (" ", $info->artist, $info->album), ": ";
+   
+   my @SONGS = $info->songs;
+   my $lastset = "";
+
+   my @SONGNAMES = map {
+      my $set = $_->{Set};
+      my $title = $_->{Title};
+
+      if (defined $set and $set ne $lastset) {
+	 $title = "$set: $title";
+      }
+      $lastset = $set;
+      $title;
+   } @SONGS;
+
+   print join (", ", @SONGNAMES), "\n";
+}
