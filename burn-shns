@@ -15,10 +15,14 @@ BURN_DIR=${BURN_DIR:-/var/tmp/burn}
 
 test -d $BURN_DIR || mkdir -p $BURN_DIR
 
+if [ $# -eq 0 ]; then
+    set `pwd`
+fi
+
 cd $BURN_DIR
 
 # Remove any stray .wav, .bin and toc files
 rm -f *.wav toc data.bin
+
 echo Burning SHN files in "$@"
-unshn "$@"
-time cdrecord -v -pad -dao -eject *.wav
+unshn "$@" && time cdrecord -v -pad -dao -eject *.wav
