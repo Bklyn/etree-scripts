@@ -24,7 +24,7 @@ my $progname = basename $0;
 my $shnlen = 1;
 my $shnfix = 0;
 my $rmfixed = 1;
-(my $version = '$Revision$') =~ s/(^\$Revision$$)//g;
+(my $version = '$Revision$') =~ s/(^.Revision:\s+|\s+\$)//g;
 
 sub usage {
    print <<EOF;
