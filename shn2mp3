@@ -873,7 +873,7 @@ sub shn_to_lossy {
    $encoder =~ s/%YEAR%/\Q$year\E/g;
    $encoder =~ s/%TRACK%/\Q$track\E/g;
    $encoder =~ s/%ENCODEROPTS%/$encoderopts/g;
-   $encoder =~ s/%OUTFILE%/$outfile/g;
+   $encoder =~ s/%OUTFILE%/\Q$outfile\E/g;
 
    my $cmd = "$decoder | $encoder " . ($debug ? "" : " > /dev/null 2>&1");
    
