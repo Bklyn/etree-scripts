@@ -203,19 +203,6 @@ sub readtext {
    close (INFOFILE);
 }
 
-# parsetime - convert mm:ss.ff into seconds
-sub parsetime {
-   my $time = shift;
-   my $seconds = 0;
-
-   if (defined $time
-       and $time =~ /^(\d+)[:\.\'](\d{2})\"?(?:[:\.](\d+))?$/) {
-      $seconds = 60.0 * $1 + $2 + ($3 || 0) / 75.0;
-   }
-
-   $seconds;
-}
-
 # fmttime - convert seconds into m:ss.ff
 sub fmttime {
    my $seconds = shift;
@@ -313,13 +300,6 @@ sub parseinfo {
 	    $self->{"Source"} .= " " if exists $self->{"Source"};
 	    $self->{"Source"} .= $line;
 	 }
-      } elsif (not $numsongs
-	       and ($line =~ $venues or
-		    $line =~ /\b$states\b/ or
-		    $line =~ $countries)
-	       and not $indisc) {
-	 $self->{"Venue"} .= " - " if exists $self->{"Venue"};
-	 $self->{"Venue"} .= $line;
       } elsif ($line =~ /^((?:trans|x)fer|conver(?:ted|sion))/i or
 	       $line =~ /($dats|$laptops|$digicards|$software)/
 	       and not $indisc) {
@@ -337,6 +317,14 @@ sub parseinfo {
       } elsif (not $numsongs and not exists $self->{"Date"} and
 	       $line =~ /($datefmt)/ix) {
 	 $self->{"Date"} = $1;
+      } elsif (not $numsongs
+	       and not exists $self->{Source}
+	       and ($line =~ $venues or
+		    $line =~ /\b$states\b/ or
+		    $line =~ $countries)
+	       and not $indisc) {
+	 $self->{"Venue"} .= " - " if exists $self->{"Venue"};
+	 $self->{"Venue"} .= $line;
       } elsif ($line =~ /^\W*(c?d|dis[kc]|volume)\W*(\d+|$numberwords)\b/ix){
 	 $discnum = word2num ($2);
 	 $indisc = $discnum;
@@ -349,7 +337,7 @@ sub parseinfo {
 	 $self->{"Discs"} = $1;
       } elsif (not $haveall and
 	       $line =~ /^(?:d\d+)?t?(\d+) 	# sometimes you see d<n>t<m>
-	       \s* (?:[-\.:\)\]]+)? 		# whitespace, some punctuation
+	       \s* (?:[[:punct:]]+)? 		# whitespace, some punctuation
 	       (.*)/x				# the track title
 	       and int ($1) > 0) {
 	 my $songnum = int $1;
@@ -455,7 +443,7 @@ sub parseinfo {
 	       if ($y < 60) {
 		  $y += 2000;
 	       } else {
-		  $y += 1900; }	 
+		  $y += 1900; }
 	    }
 	    $self->{CanonicalDate} = sprintf ("%04d-%02d-%02d", $y, $m, $d);
 	 } elsif ($self->{Date} =~ m@^(\d{4})[-/](\d\d)[-/](\d\d)$@
