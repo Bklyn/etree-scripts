@@ -209,7 +209,7 @@ sub parsetime {
    my $seconds = 0;
 
    if (defined $time
-       and $time =~ /^(\d+)[:\.\'](\d{2})\"?(?:[:\.](\d{2}))?$/) {
+       and $time =~ /^(\d+)[:\.\'](\d{2})\"?(?:[:\.](\d+))?$/) {
       $seconds = 60.0 * $1 + $2 + ($3 || 0) / 75.0;
    }
 
@@ -243,7 +243,7 @@ sub parsetitle {
    my ($segue, $notes, $running_time, $set);
 
    # Strip off any running time from the end of the title
-   $title =~ s/\W?(\d+[:\.\']\d{2}([\":\.]\d{2}?)?)\W?/
+   $title =~ s/\W?(\d+[:\.\']\d{2}([\":\.]\d+)?)\W?/
      $running_time = $1; ""; /eg;
 
    # I've been seeing this a lot in some info files: whitespace,
