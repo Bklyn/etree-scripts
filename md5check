@@ -200,8 +200,8 @@ my %TODO;
 
 foreach my $arg (@ARGV) {
    sub wanted {
+      return unless -f;
       my $file = $File::Find::name;
-      return unless -f $file;
       foreach my $match (keys %CHECKERS) {
 	 if ($file =~ /$match/i) {
 	    my $fn = $CHECKERS{$match};
