@@ -140,23 +140,55 @@ sub check_md5file {
 # Check a set of .flac files for consistency
 sub check_flacfiles {
    my @FILES = @_;
-   my $retcode = system ("flac", "-t", @FILES);
+   my $retval = 0;
 
-   my $exit_value  = $retcode >> 8;
-   my $signal_num  = $retcode & 127;
-   my $dumped_core = $retcode & 128;
+   my @OK;
+   my @FAILED;
+   my $lastdir;
 
-   if ($exit_value == 0 and not $signal_num and not $dumped_core) {
-      print "$progname: " . scalar (@FILES) . " FLAC files OK\n";
-   } elsif ($signal_num) {
-      warn "$progname: FLAC exited on signal $signal_num" .
-	($dumped_core ? " (dumped core)" : "") . "\n";
-   } else {
-      warn "$progname: one or more errors in " .
-	scalar (@FILES) . " FLAC files.\n";
+   foreach my $file (@FILES) {
+      my $base = basename $file;
+      my $dir = dirname $file;
+
+      if (not defined $lastdir or $lastdir ne $dir) {
+	 print "$progname: checking FLAC files in $dir:\n";
+	 $lastdir = $dir;
+      }
+
+      print " checking $base: ";
+
+      my $retcode = system ("flac", "-t", "-s", $file);
+
+      my $exit_value  = $retcode >> 8;
+      my $signal_num  = $retcode & 127;
+      my $dumped_core = $retcode & 128;
+
+      if ($exit_value == 0 and not $signal_num and not $dumped_core) {
+	 print "OK\n";
+	 push (@OK, $file);
+      } else {
+	 print "ERROR: FLAC exited" .
+	   ($exit_value ? " with status $exit_value" : "") .
+	     ($signal_num ? " from signal $signal_num" : "") .
+	       ($dumped_core ? " (dumped core)" : "") . "\n";
+	 last if $signal_num == 2;
+	 push (@FAILED, $file);
+	 $retval |= 1;
+      }
    }
 
-   return $exit_value;
+   my $ok = scalar @OK;
+   my $failed = scalar @FAILED;
+
+   if ($retval == 0) {
+      print "$progname: $ok file" . ($ok > 1 ? "s" : "") . " OK\n";
+   } else {
+      print "$progname: ERROR: " .
+	($ok ? "$ok file" . ($ok > 1 ? "s" : "") . " OK, " : "") .
+	  "$failed failure" . ($failed > 1 ? "s" : "") . "\n";
+   }
+
+   return $retval;
 }
 
 my %CHECKERS = ( "\\.md5\$" => \&check_md5files,
@@ -169,6 +201,7 @@ my %TODO;
 foreach my $arg (@ARGV) {
    sub wanted {
       my $file = $File::Find::name;
+      return unless -f $file;
       foreach my $match (keys %CHECKERS) {
 	 if ($file =~ /$match/i) {
 	    my $fn = $CHECKERS{$match};
