@@ -5,6 +5,9 @@ version:      2.0
 version_from: 
 installdirs:  vendor
 requires:
+    Date::Parse:                   0
+    Digest::MD5:                   0
+    HTML::Entities:                0
 
 distribution_type: module
 generated_by: ExtUtils::MakeMaker version 6.17
