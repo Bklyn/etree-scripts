@@ -1,3 +1,26 @@
+2004-09-02  Caleb Epstein  <cae at bklyn dot org>
+
+	* Makefile.PL: Version 2.3
+
+	* flacify: Add ReplyGain information to FLACs if it does not exist
+	(--noreplay-gain to disable).  Allow user to configure tag format.
+
+	* md5check: Put parens around args to open()
+
+	* shn2mp3: Cygwin enhancements
+
+2004-07-28  Caleb Epstein  <cae at bklyn dot org>
+
+	* Etree/InfoFile.pm: Deal with no Locale module
+
+2004-07-09  Caleb Epstein  <cae at bklyn dot org>
+
+	* flacify: Conviert paths to absolute before we do any chdirs.
+
+2004-04-20  Caleb Epstein  <cae at bklyn dot org>
+
+	* debian/changelog, ChangeLog, Makefile.PL: Release 2.2 (bugfix)
+
 2004-04-20  Caleb Epstein  <cae at bklyn dot org>
 
 	* Makefile.PL, debian/changelog: Release 2.2 (bugfix)
