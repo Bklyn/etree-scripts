@@ -31,17 +31,7 @@ EOF
 }
 
 my $progname = basename $0; $progname =~ s/\.pl$//;
-
 my $status = 0;
-
-sub check_md5files {
-   my @MD5FILES = @_;
-   my $md5stat = 0;
-   foreach my $md5file (@MD5FILES) {
-      $md5stat |= check_md5file ($md5file);
-   }
-   $md5stat;
-}
 
 sub check_md5file {
    my $md5file = shift;
@@ -132,7 +122,103 @@ sub check_md5file {
 	  "$missing files missing\n";
    }
 
-   close MD5;
+   $status;
+}
+
+
+# check_ffpfile - Check a FLAC fingerprint file
+sub check_ffpfile {
+   my $ffpfile = shift;
+   my $dir = dirname $ffpfile;
+   my $base = basename $ffpfile;
+   my $status = 0;
+   my $ok = 0;
+   my $failures = 0;
+   my $missing = 0;
+
+   if (not open (FFP, $ffpfile)) {
+      warn "$progname: unable to open FFP file $ffpfile: $!\n";
+      return 1;
+   }
+
+   my $data;
+   {
+      local $/ = undef;
+      $data = <FFP>;
+   }
+   close FFP;
+
+   $data =~ s/\r/\n/g;
+
+   # Split md5 data on newlines
+   my @LINES = split /\n/, $data;
+   # Pull out only lines that look like md5 lines
+   my @SUMS = grep /^(.+):([\da-f]{32})$/, @LINES;
+   # Sort the sums by filename
+   @SUMS = sort { my @A = split /:/, $a; my @B = split /:/, $b;
+		  $A[0] cmp $B[0] } @SUMS;
+
+   if (not scalar @SUMS) {
+      warn "$progname: $base: no valid FLAC fingerprints found\n";
+      return 0;
+   }
+
+   print "$progname: checking fingerprint file $base (" . scalar (@SUMS) .
+     " files):\n";
+
+   $| = 1;
+
+   foreach (@SUMS) {
+      chomp;
+
+      if (not /^(.+):([\da-f]{32})$/) {
+	 warn "$progname: $ffpfile: invalid syntax: $_\n";
+	 next;
+      }
+
+      my ($sum, $file) = ($2, $1);
+      my $fullfile = "$dir/$file";
+
+      if (not open (METAFLAC, "metaflac --show-md5sum $fullfile|")) {
+	 warn "$progname: $base: can't open pipe to metaflac: $!\n";
+	 $status |= 2;
+	 if (not -f $fullfile) {
+	    ++$missing;
+	 }
+	 next;
+      }
+
+      my $hexdigest = <METAFLAC>;
+      chomp $hexdigest;
+
+      print " checking $file: ";
+
+      if ($hexdigest =~ /^[\da-f]{32}$/ and $hexdigest eq $sum) {
+	 print "OK (fingerprint)\n";
+	 ++$ok;
+      } else {
+	 print "ERROR (fingerprint)\n";
+	 $status |= 1;
+	 ++$failures;
+      }
+
+      close METAFLAC;
+   }
+
+   if ($status == 0) {
+      print "$progname: $base: $ok files OK\n";
+   } elsif ($failures) {
+      warn "$progname: $base: ERROR: " .
+	($ok > 0 ? "$ok file" . ($ok > 1 ? "s" : "") . " OK, " : "") .
+	  "$failures failure" .
+	    ($failures > 1 ? "s" : "") .
+	      ($missing ? ", $missing missing file" .
+	       ($missing > 1 ? "s" : "") : "") . "\n";
+   } elsif ($missing) {
+      warn "$progname: $base: WARNING: " .
+	($ok > 0 ? "$ok files OK, " : "") .
+	  "$missing files missing\n";
+   }
 
    $status;
 }
@@ -151,7 +237,7 @@ sub check_flacfiles {
       my $dir = dirname $file;
 
       if (not defined $lastdir or $lastdir ne $dir) {
-	 print "$progname: checking FLAC files in $dir:\n";
+	 print "$progname: checking integrity of FLAC files in $dir:\n";
 	 $lastdir = $dir;
       }
 
@@ -191,8 +277,10 @@ sub check_flacfiles {
    return $retval;
 }
 
-my %CHECKERS = ( "\\.md5\$" => \&check_md5files,
-		 "\\.flac\$" => \&check_flacfiles);
+my %CHECKERS = ( "\\.md5\$" => \&check_md5file,
+		 "\\.ffp\$" => \&check_ffpfile,
+		 "ffp\\.txt\$" => \&check_ffpfile,
+		 "\\.flac\$" => [ \&check_flacfiles ]);
 
 push (@ARGV, ".") unless scalar @ARGV;
 
@@ -204,7 +292,6 @@ foreach my $arg (@ARGV) {
       my $file = $File::Find::name;
       foreach my $match (keys %CHECKERS) {
 	 if ($file =~ /$match/i) {
-	    my $fn = $CHECKERS{$match};
 	    push (@{$TODO{$match}}, $file);
 	    last;
 	 }
@@ -215,7 +302,17 @@ foreach my $arg (@ARGV) {
 
 foreach my $match (keys %TODO) {
    my $function = $CHECKERS{$match};
-   $status |= &$function (sort @{$TODO{$match}});
+   my @FILES = sort @{$TODO{$match}};
+
+   if (ref ($function) eq "ARRAY") {
+      # Function can handle an array
+      $function = $$function[0];
+      $status |= &$function (@FILES);
+   } else {
+      foreach my $file (@FILES) {
+	 $status |= &$function ($file);
+      }
+   }
 }
 
 exit $status;
