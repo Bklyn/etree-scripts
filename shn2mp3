@@ -244,6 +244,14 @@ if ($retval == 0 or $help or not scalar @ARGV) {
    exit (not $help);
 }
 
+my %EXES;
+
+my %URLS = ( "shorten" => "http://etree.org/shnutils/shorten/",
+	     "flac" => "http://flac.sourceforge.net/",
+	     "mpg123" => "http://www.mpg123.de/",
+	     "oggenc" => "http://www.vorbis.com/",
+	     "lame" => "http://lame.sourceforge.net/");
+
 my %DECODER = ( "shn" => "shorten -x %FILE% -",
 		"flac" => "flac -d -s -c %FILE%",
 		"mp3" => "mpg123 -q -s %FILE%",
@@ -281,6 +289,35 @@ http://www.perl.com/language/misc/Artistic.html>
 
 EOF
   ;
+}
+
+# findexe - find a binary in the PATH
+sub findexe {
+   my $command = shift;
+   my ($exe, $rest) = split (/ /, $command, 2);
+
+   return $EXES{$exe} if exists $EXES{$exe};
+
+   my $fullpath;
+
+   $fullpath = $exe if $exe =~ m@^/@ and -x $exe;
+
+   if (not defined $fullpath) {
+      my @PATH = File::Spec->path();
+      foreach my $dir (@PATH) {
+	 if (-x "$dir/$exe") {
+	    $fullpath = "$dir/$exe";
+	    last;
+	 }
+      }
+   }
+
+   if (not defined $fullpath) {
+      die "Unable to find `$exe' in your PATH." .
+	(exists $URLS{$exe} ? "  Try $URLS{$exe}" : "") . "\n";
+   }
+
+   $EXES{$exe} = $fullpath;
 }
 
 sub mkdir_p {
@@ -374,6 +411,9 @@ sub lossless_to_lossy {
    $encoder =~ s/%TRACK%/\Q$track\E/g;
    $encoder =~ s/%ENCODEROPTS%/$encoderopts/g;
    $encoder =~ s/%OUTFILE%/\Q$outfile\E/g;
+
+   findexe ($decoder) or die;
+   findexe ($encoder) or die;
 
    my $cmd = "$decoder | $encoder " . ($debug ? "" : " > /dev/null 2>&1");
 
