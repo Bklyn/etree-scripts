@@ -31,196 +31,166 @@ EOF
 }
 
 my $progname = basename $0; $progname =~ s/\.pl$//;
-my $status = 0;
+my $checksum_regex = '\b[\da-f]{32}\b';
+my %HAVE_SUMS;
 
-sub check_md5file {
-   my $md5file = shift;
-   my $dir = dirname $md5file;
-   my $base = basename $md5file;
-   my $status = 0;
-   my $ok = 0;
-   my $failures = 0;
-   my $missing = 0;
+# check_md5 - compute the MD5 digest of a file and compare it to a
+# known-good digest string
+sub check_md5 {
+   my ($file, $sum) = @_;
 
-   if (not open (MD5, $md5file)) {
-      warn "$progname: unable to open MD5 file $md5file: $!\n";
-      return 1;
-   }
+   open (FILE, $file) or return 1;
 
-   undef $/;
-   my $data = <MD5>;
-   close MD5;
+   binmode FILE;		# In case we're on Windows
 
-   $data =~ s/\r/\n/g;
+   my $md5 = Digest::MD5->new;
+   my $hexdigest = $md5->addfile (*FILE)->hexdigest;
 
-   # Split md5 data on newlines
-   my @LINES = split /\n/, $data;
-   # Pull out only lines that look like md5 lines
-   my @SUMS = grep /^([\da-f]{32})\s+\*?(.*)$/, @LINES;
-   # Sort the sums by filename
-   @SUMS = sort { my @A = split /\s+/, $a; my @B = split /\s+/, $b;
-		  $A[1] cmp $B[1] } @SUMS;
+   close FILE;
 
-   if (not scalar @SUMS) {
-      warn "$progname: $base: no valid MD5 sums found\n";
-      return 0;
-   }
-
-   print "$progname: checking MD5 file $base (" . scalar (@SUMS) .
-     " files):\n";
-
-   $| = 1;
-
-   foreach (@SUMS) {
-      if (not /^([\da-f]{32})\s+\*?(.*)$/) {
-	 warn "$progname: $md5file: invalid syntax: $_\n";
-	 next;
-      }
-
-      my ($sum, $file) = ($1, $2);
-      my $fullfile = "$dir/$file";
-
-      if (not open (FILE, $fullfile)) {
-	 warn "$progname: $base: can't open $fullfile: $!\n";
-	 $status |= 2;
-	 if (not -f $fullfile) {
-	    ++$missing;
-	 }
-	 next;
-      }
-
-      binmode FILE;		# In case we're on Windows
-
-      print " checking $file: ";
-
-      my $md5 = Digest::MD5->new;
-      my $hexdigest = $md5->addfile (*FILE)->hexdigest;
-
-      if ($hexdigest eq $sum) {
-	 print "OK\n";
-	 ++$ok;
-      } else {
-	 print "ERROR\n";
-	 $status |= 1;
-	 ++$failures;
-      }
-      close FILE;
-   }
-
-   if ($status == 0) {
-      print "$progname: $base: $ok files OK\n";
-   } elsif ($failures) {
-      warn "$progname: $base: ERROR: " .
-	($ok > 0 ? "$ok file" . ($ok > 1 ? "s" : "") . " OK, " : "") .
-	  "$failures failure" .
-	    ($failures > 1 ? "s" : "") .
-	      ($missing ? ", $missing missing file" .
-	       ($missing > 1 ? "s" : "") : "") . "\n";
-   } elsif ($missing) {
-      warn "$progname: $base: WARNING: " .
-	($ok > 0 ? "$ok files OK, " : "") .
-	  "$missing files missing\n";
-   }
-
-   $status;
+   return ($hexdigest eq $sum) ? 0 : 1;
 }
 
+# check_ffp - extract the MD5 "fingerprint" from a FLAC file and
+# compare it to a known-good digest string
+sub check_ffp {
+   my ($file, $sum) = @_;
 
-# check_ffpfile - Check a FLAC fingerprint file
-sub check_ffpfile {
-   my $ffpfile = shift;
-   my $dir = dirname $ffpfile;
-   my $base = basename $ffpfile;
+   open (METAFLAC, "metaflac --show-md5sum $file|") or return 1;
+   my $hexdigest = <METAFLAC>;
+   close METAFLAC;
+   chomp $hexdigest;
+
+   return ($hexdigest eq $sum) ? 0 : 1;
+}
+
+# parse_checksum_line - parse a line and split it into a checksum,
+# filename, and a reference to the function we need to check the sum
+sub parse_checksum_line {
+   my $line = shift;
+   my ($file, $checksum, $checker) = ("", undef, undef);
+
+   if ($line =~ /^\s*(.+):($checksum_regex)\s*$/) {
+      ($file, $checksum, $checker) = ($1, $2, \&check_ffp);
+   } elsif ($line =~ /^\s*($checksum_regex)\s+\[shntool\]\s+(.+)\s*$/) {
+      # For now just ignore shntool WAV data checksums
+   } elsif ($line =~ /^\s*($checksum_regex)\s+\*?(.+)\s*$/) {
+      ($file, $checksum, $checker) = ($2, $1, \&check_md5);
+   }
+
+   ($file, $checksum, $checker);
+}
+
+sub plural {
+   my ($value, $string) = @_;
+   "$value $string" . ($value != 1 ? "s" : "");
+}
+
+sub print_summary {
+   my ($ok, $errors, $missing, $file) = @_;
+
+   return unless $ok or $errors or $missing;
+
+   $file ||= "Summary";
+   my $status = ($errors ? "ERROR" : ($missing ? "WARNING" : "All OK"));
+   my @SUMMARY;
+
+   push (@SUMMARY, plural ($ok, "file") . " OK") if $ok;
+   push (@SUMMARY, plural ($errors, "error")) if $errors;
+   push (@SUMMARY, plural ($missing, "missing file")) if $missing;
+
+   print "$file: $status: " . join (", ", @SUMMARY) . "\n";
+}
+
+# check_file - look for MD5 checksums in a file (FLAC "fingerprint"
+# format or standard "md5sum" format) and check them.
+sub check_file {
+   my $sumfile = shift;
+   my $dir = dirname $sumfile;
+   my $base = basename $sumfile;
    my $status = 0;
    my $ok = 0;
-   my $failures = 0;
+   my $errors = 0;
    my $missing = 0;
 
-   if (not open (FFP, $ffpfile)) {
-      warn "$progname: unable to open FFP file $ffpfile: $!\n";
-      return 1;
+   if (not open (MD5, $sumfile)) {
+      warn "$progname: unable to open file $sumfile: $!\n";
+      return (0, 1, 0);
    }
 
    my $data;
+
+   # Slurp the entire file in one go
    {
       local $/ = undef;
-      $data = <FFP>;
+      $data = <MD5>;
    }
-   close FFP;
 
    $data =~ s/\r/\n/g;
 
    # Split md5 data on newlines
    my @LINES = split /\n/, $data;
-   # Pull out only lines that look like md5 lines
-   my @SUMS = grep /^(.+):([\da-f]{32})$/, @LINES;
-   # Sort the sums by filename
-   @SUMS = sort { my @A = split /:/, $a; my @B = split /:/, $b;
-		  $A[0] cmp $B[0] } @SUMS;
 
-   if (not scalar @SUMS) {
-      warn "$progname: $base: no valid FLAC fingerprints found\n";
-      return 0;
-   }
+   # Pull out only lines that look like md5 lines (32 hex digits stand
+   # by themselves), and turn them into (file, sum, checker) triplets
+   my @SUMS = grep /$checksum_regex/, @LINES;
+   chomp @SUMS;
 
-   print "$progname: checking fingerprint file $base (" . scalar (@SUMS) .
-     " files):\n";
+   # Parse the line for filename, checksum, and functor; filter out
+   # lines which look like checksums but which have an undef'd functor
+   @SUMS = grep { defined $$_[2] }
+     map { [ parse_checksum_line ($_) ] } @SUMS;
+
+   # Sort by filename
+   @SUMS = sort { $$a[0] cmp $$b[0] } @SUMS;
+
+   return (0, 0, 0) unless scalar @SUMS;
+
+   print "Checking $base (" . plural (scalar (@SUMS), "file") . "):\n";
 
    $| = 1;
 
    foreach (@SUMS) {
-      chomp;
-
-      if (not /^(.+):([\da-f]{32})$/) {
-	 warn "$progname: $ffpfile: invalid syntax: $_\n";
-	 next;
-      }
-
-      my ($sum, $file) = ($2, $1);
+      my ($file, $sum, $func) = @{$_};
       my $fullfile = "$dir/$file";
-
-      if (not open (METAFLAC, "metaflac --show-md5sum $fullfile|")) {
-	 warn "$progname: $base: can't open pipe to metaflac: $!\n";
-	 $status |= 2;
-	 if (not -f $fullfile) {
-	    ++$missing;
-	 }
-	 next;
-      }
-
-      my $hexdigest = <METAFLAC>;
-      chomp $hexdigest;
 
       print " checking $file: ";
 
-      if ($hexdigest =~ /^[\da-f]{32}$/ and $hexdigest eq $sum) {
-	 print "OK (fingerprint)\n";
-	 ++$ok;
-      } else {
-	 print "ERROR (fingerprint)\n";
+      # Before even calling the appropriate function, check for
+      # existence and permissions to read
+      if (not -e $fullfile) {
+	 print "MISSING\n";
+	 $status |= 2;
+	 ++$missing;
+	 next;
+      } elsif (not -r $fullfile) {
+	 print "PERMISSION DENIED\n";
 	 $status |= 1;
-	 ++$failures;
+	 ++$errors;
+	 next;
       }
 
-      close METAFLAC;
+      # Run the checker
+      my $result = &$func ($fullfile, $sum);
+
+      if ($result == 0) {
+	 print "OK\n";
+	 ++$ok;
+      } elsif ($result == 2) {
+	 print "MISSING\n";
+	 $status |= 2;
+	 ++$missing;
+      } else {
+	 print "ERROR\n";
+	 $status |= 1;
+	 ++$errors;
+      }
    }
 
-   if ($status == 0) {
-      print "$progname: $base: $ok files OK\n";
-   } elsif ($failures) {
-      warn "$progname: $base: ERROR: " .
-	($ok > 0 ? "$ok file" . ($ok > 1 ? "s" : "") . " OK, " : "") .
-	  "$failures failure" .
-	    ($failures > 1 ? "s" : "") .
-	      ($missing ? ", $missing missing file" .
-	       ($missing > 1 ? "s" : "") : "") . "\n";
-   } elsif ($missing) {
-      warn "$progname: $base: WARNING: " .
-	($ok > 0 ? "$ok files OK, " : "") .
-	  "$missing files missing\n";
-   }
+   print_summary ($ok, $errors, $missing, $base);
+   print "\n";
 
-   $status;
+   return ($ok, $errors, $missing);
 }
 
 # Check a set of .flac files for consistency
@@ -230,14 +200,30 @@ sub check_flacfiles {
 
    my @OK;
    my @FAILED;
+   my $lastok = 0;
+   my $lastfailed = 0;
    my $lastdir;
+   my %NUMFILES;
+
+   map { ++$NUMFILES{ dirname($_) } } @FILES;
 
    foreach my $file (@FILES) {
       my $base = basename $file;
       my $dir = dirname $file;
 
       if (not defined $lastdir or $lastdir ne $dir) {
-	 print "$progname: checking integrity of FLAC files in $dir:\n";
+	 if (defined $lastdir) {
+	    print_summary (scalar (@OK) - $lastok,
+			   scalar (@FAILED) - $lastfailed,
+			   0, basename $lastdir);
+	    print "\n";
+	    $lastok = scalar @OK;
+	    $lastfailed = scalar @FAILED;
+	 }
+
+	 print "Checking FLAC files in $dir (" .
+	   plural ($NUMFILES{$dir}, "file") . "):\n";
+
 	 $lastdir = $dir;
       }
 
@@ -253,34 +239,32 @@ sub check_flacfiles {
 	 print "OK\n";
 	 push (@OK, $file);
       } else {
-	 print "ERROR: FLAC exited" .
+	 warn "ERROR: FLAC exited" .
 	   ($exit_value ? " with status $exit_value" : "") .
 	     ($signal_num ? " from signal $signal_num" : "") .
 	       ($dumped_core ? " (dumped core)" : "") . "\n";
+	 # Stop processing if someone hits Ctrl-C
 	 last if $signal_num == 2;
 	 push (@FAILED, $file);
 	 $retval |= 1;
       }
    }
 
+   if (defined $lastdir) {
+      print_summary (scalar (@OK) - $lastok,
+		     scalar (@FAILED) - $lastfailed,
+		     0, basename $lastdir);
+      print "\n";
+   }
+
    my $ok = scalar @OK;
    my $failed = scalar @FAILED;
 
-   if ($retval == 0) {
-      print "$progname: $ok file" . ($ok > 1 ? "s" : "") . " OK\n";
-   } else {
-      print "$progname: ERROR: " .
-	($ok ? "$ok file" . ($ok > 1 ? "s" : "") . " OK, " : "") .
-	  "$failed failure" . ($failed > 1 ? "s" : "") . "\n";
-   }
-
-   return $retval;
+   return ($ok, $failed, 0);
 }
 
-my %CHECKERS = ( "\\.md5\$" => \&check_md5file,
-		 "\\.ffp\$" => \&check_ffpfile,
-		 "ffp\\.txt\$" => \&check_ffpfile,
-		 "\\.flac\$" => [ \&check_flacfiles ]);
+my %CHECKERS = ( '\.(ffp|md5|txt)$' => \&check_file,
+		 '\.flac$' => [ \&check_flacfiles ]);
 
 push (@ARGV, ".") unless scalar @ARGV;
 
@@ -300,6 +284,8 @@ foreach my $arg (@ARGV) {
    find (\&wanted, $arg);
 }
 
+my ($ok, $errors, $missing) = (0, 0, 0);
+
 foreach my $match (keys %TODO) {
    my $function = $CHECKERS{$match};
    my @FILES = sort @{$TODO{$match}};
@@ -307,12 +293,23 @@ foreach my $match (keys %TODO) {
    if (ref ($function) eq "ARRAY") {
       # Function can handle an array
       $function = $$function[0];
-      $status |= &$function (@FILES);
+      my @A = &$function (@FILES);
+      $ok += $A[0];
+      $errors += $A[1];
+      $missing += $A[2];
    } else {
+      # Function takes one file at a time
       foreach my $file (@FILES) {
-	 $status |= &$function ($file);
+	 my @A = &$function ($file);
+	 $ok += $A[0];
+	 $errors += $A[1];
+	 $missing += $A[2];
       }
    }
 }
 
-exit $status;
+if ($ok or $errors or $missing) {
+   print_summary ($ok, $errors, $missing);
+}
+
+exit (0 | ($errors ? 1 : 0) | ($missing ? 2 : 0));
