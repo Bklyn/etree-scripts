@@ -274,7 +274,7 @@ my %ENCODER = ( "mp3" => ("lame " .
 	      );
 
 sub version {
-   my ($encoder, $rest) = split /\s/, $ENCODER{$output_type};
+   my $encoder = $output_type eq "mp3" ? "lame" : "oggenc";
    my $encoderversion = `$encoder --version | head -1`;
    chomp $encoderversion;
 
