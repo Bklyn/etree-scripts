@@ -52,6 +52,15 @@ my $output_type = ($progname =~ /(ogg|mp3)$/ ? $1 : "mp3");
 die "ActiveState Perl not supported; install Cygwin (http://www.cygwin.com)\n"
   if $^O =~ /MSWin32/;
 
+# On Windows, add the FLAC install dir to the PATH
+if ($^O eq "MSWin32") {		# Active State
+   $ENV{"PATH"} .= ';c:\Program Files\FLAC'
+     if -d 'c:\Program Files\FLAC';
+} elsif ($^O eq "cygwin") {	# Cygwin
+   $ENV{"PATH"} .= ':/c/Program Files/FLAC'
+     if -d '/c/Program Files/FLAC';
+}
+
 format STDOUT_TOP =
 +-----------------------------------------------------------------------------+
 |   Directory: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
