@@ -22,9 +22,21 @@ my $rcsid = q$Id$;
 my $debug = 0;
 my $dryrun = 0;
 my $tagdiscs = 0;
+my $replay_gain = 1;
+
 my %EXES = ("unshn" => undef,
 	    "flac" => undef,
 	    "metaflac" => undef);
+
+my %TAGFORMAT = ("ARTIST" => "ARTIST",
+		 "ALBUM" => "ALBUM",
+		 "DATE" => "DATE",
+		 "LOCATION" => "LOCATION",
+		 "SOURCEMEDIA" => "SOURCEMEDIA",
+		 "DISCNUMBER" => "DISCNUMBER",
+		 "TRACKNUMBER" => "TRACKNUMBER",
+		 "TITLE" => "TITLE",
+		 "COMMENT" => "COMMENT");
 
 # On Windows, add the FLAC install dir to the PATH
 if ($^O eq "MSWin32") {		# Active State
@@ -49,7 +61,9 @@ GetOptions ("debug!" => \$debug,
 	    "dry-run!" => \$dryrun,
 	    "help!" => sub { use Pod::Usage;
 			     pod2usage (-exitval => 0, -verbose => 1); },
-	    "version!" => sub { print "$progname $rcsid\n"; exit (0); });
+	    "version!" => sub { print "$progname $rcsid\n"; exit (0); },
+	    "replay-gain!" => \$replay_gain,
+	    "tag=s%" => \%TAGFORMAT);
 
 # findexe - find a binary in the PATH
 sub findexe {
@@ -197,11 +211,13 @@ sub convert_files {
 
 	 # Compress the WAV files to FLAC files, deleting as we go.
 	 # Ensure CD sector alignment
-	 my $status = run_command ("flac",
-				   "--sector-align",
-				   "--delete-input-file",
-				   "--replay-gain",
-				   @FILES);
+	 my @CMD = ("flac", "--sector-align", "--delete-input-file");
+
+	 if ($replay_gain) {
+	    push (@CMD, "--replay-gain");
+	 }
+
+	 my $status = run_command (@CMD, @FILES);
 
 	 if ($status != 0) {
 	    # Remove any FLACs we created
@@ -233,6 +249,12 @@ sub convert_files {
    print "Tagging files:\n";
 
    tag_files ($info, $songs, \@FLACS) or die "Error tagging files\n";
+
+   # If we have pre-existing FLAC files, make sure they have Replay
+   # Gain tags
+   if ($replay_gain and not scalar @SHNS) {
+      replay_gain (@FLACS) or die "Error calculating ReplayGain\n";
+   }
 
    # 4. Move files to $info->{Directory}
    foreach my $file (@FLACS) {
@@ -274,40 +296,58 @@ sub tag_files {
 
    # FLAC tags taken from
    # http://reactor-core.org/ogg-tag-recommendations.html
-   my %TAGS;
+   my %VALUES;
 
-   $TAGS{"ARTIST"} = $info->artist if $info->artist;
-   $TAGS{"ALBUM"} = $info->album if $info->album;
-   $TAGS{"DATE"} = $info->date if $info->date;
-   $TAGS{"LOCATION"} = $info->venue if $info->venue;
-   $TAGS{"SOURCEMEDIA"} = $info->source if $info->source;
+   $VALUES{"ARTIST"} = $info->artist if $info->artist;
+   $VALUES{"ALBUM"} = $info->album if $info->album;
+   $VALUES{"DATE"} = $info->date if $info->date;
+   $VALUES{"LOCATION"} = $info->venue if $info->venue;
+   $VALUES{"SOURCEMEDIA"} = $info->source if $info->source;
 
    foreach my $index (0 .. $#$files) {
       my $song = ref ($songs) ? $songs->[$index] : undef;
-      delete $TAGS{"DISCNUMBER"};
-      delete $TAGS{"TRACKNUMBER"};
-      delete $TAGS{"TITLE"};
-      delete $TAGS{"COMMENT"};
+
+      delete $VALUES{"DISCNUMBER"};
+      delete $VALUES{"TRACKNUMBER"};
+      delete $VALUES{"TITLE"};
+      delete $VALUES{"COMMENT"};
 
       # If running in --discs mode, tag files with DISCNUMBER and
       # TRACKNUMBER.  Not all applications/devices honor the
       # DISCNUMBER tag though, so this may leave you with all of your
       # Track 1's sorting before all of your Track 2's.
       if (defined $song and $tagdiscs) {
-	 $TAGS{"DISCNUMBER"} = $song->{Disc} if $song->{Disc};
-	 $TAGS{"TRACKNUMBER"} = $song->{Track} || ($index + 1);
+	 $VALUES{"DISCNUMBER"} = $song->{Disc} if $song->{Disc};
+	 $VALUES{"TRACKNUMBER"} = $song->{Track} || ($index + 1);
       } else {
-	 $TAGS{"DISCNUMBER"} = undef;
-	 $TAGS{"TRACKNUMBER"} = $index + 1;
+	 $VALUES{"DISCNUMBER"} = undef;
+	 $VALUES{"TRACKNUMBER"} = $index + 1;
       }
 
-      $TAGS{"TITLE"} = $song->{Title} if defined $song and $song->{Title};
+      $VALUES{"TITLE"} = $song->{Title} if defined $song and $song->{Title};
 
       my $note;
       $note = $song->{Notes} if defined $song and exists $song->{Notes};
 
       if (defined $note and exists $info->{Notes}{$note}) {
-	 $TAGS{"COMMENT"} = $info->{Notes}{$note};
+	 $VALUES{"COMMENT"} = $info->{Notes}{$note};
+      } else {
+	 $VALUES{"COMMENT"} = undef;
+      }
+
+      my %TAGS = %TAGFORMAT;
+
+      foreach my $tag (keys %TAGS) {
+	 my $format = $TAGS{$tag};
+	 foreach my $key (keys %VALUES) {
+	    my $value = $VALUES{$key} || "";
+	    $format =~ s/\b$key\b/$value/g;
+	 }
+	 if (length $format and $format ne $TAGS{$tag}) {
+	    $TAGS{$tag} = $format;
+	 } else {
+	    delete $TAGS{$tag};
+	 }
       }
 
       print "" . sprintf ("%2d/%2d", $index + 1, $#$files + 1) . ": " .
@@ -331,6 +371,42 @@ sub tag_files {
    }
 
    1;
+}
+
+sub replay_gain {
+   my @FILES = @_;
+
+   return 1 unless $replay_gain;
+
+   if (not open (METAFLAC, "$EXES{metaflac} --list " .
+		 "--block-type=VORBIS_COMMENT \Q$FILES[0]\E|")) {
+      warn "Unable to read VORBIS_COMMENT block from $FILES[0] " .
+	"to check for ReplayGain tags\n";
+      return 0;
+   }
+
+   my $need = 1;
+
+   while (<METAFLAC>) {
+      $need = 0 if /REPLAYGAIN/;
+   }
+
+   close METAFLAC;
+
+   return 1 unless $need;
+
+   print "Adding ReplayGain information to FLACs (this may take a while)\n";
+
+   my @CMD = ("metaflac", "--add-replay-gain", @FILES);
+
+   my $status = run_command (@CMD);
+
+   if ($status != 0) {
+      warn "Error adding ReplayGain tags to FLAC files\n";
+      return 0;
+   }
+
+   return 1;
 }
 
 # Operate on CWD if nothing is specified
@@ -422,6 +498,24 @@ disc groups.
 
 Print what commands would be run, but don't run them.
 
+=item B<--noreplay-gain>
+
+Disable the Replay Gain calculations when creating new FLAC files or
+updating existing FLAC files.
+
+=item B<--tag> B<TAG>=B<FORMAT>
+
+Specify the formatting for the tags written to the FLAC files, or add
+your own user-defined tags.  The default format for all of the
+available tags is just themselves (e.g. DATE=DATE, COMMENT=COMMENT).
+You can change the formatting by specifying something different.  For
+exmaple, if you wanted the track title tags to include the date, you
+could specify --tag "TITLE=DATE TITLE".  You could add your own tag to
+all files by --tag MYTAG=MYVALUE.
+
+See the section on L<Tagging> below for a list of all the standard
+tags which are used by flacify.
+
 =back
 
 =head1 DESCRIPTION
@@ -467,6 +561,8 @@ At the end of this step we are left will all WAV or FLAC files.
 Any WAV files resulting from the previous step are then compressed
 using the command line L<flac> encoder.  The following options are
 passed to L<flac>: --sector-align --delete-input-file --replay-gain.
+The --reply-gain option is omitted if the user passes --noreplay-gain
+to shn2mp3.
 
 =item Tagging
 
