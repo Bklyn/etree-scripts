@@ -1,0 +1,45 @@
+PREREQUISITES
+
+You won't get far without these Perl modules and command-line
+applications installed and available in your default PATH:
+
+	Date::Parse	Required.  See CPAN http://cpan.org/ if you need it.
+			(You can run "perl -MDate::Parse -e1" to check.
+			If you get any errors, you need a copy)
+
+	Audio::Wav	Optional, but recommended.  Available from CPAN.
+
+	HTML::Parser	Required for the makehbx script.  See
+			http://catchen.org/hillsboro/ for more info on
+			HBX.
+
+	shorten		If you deal with Shorten files, you need this.
+			http://etree.org/shnutils/shorten/
+
+	flac		If you deal with FLAC files, you need this
+			http://flac.sourceforge.net/ .  Make sure
+			metaflac is available as well to do tagging.
+
+	shntool		Highly recommended.  Available from
+			http://etree.org/shnutils/shntool/
+
+	cdrecord        If you plan to burn one (or 1000...) down,
+
+	lame		If you intend on making any MP3s, you need this.
+			http://lame.sourceforge.net/
+
+	oggenc		Similarly, if you plan on making any Ogg Vorbis
+			files using shn2ogg you will need this.
+			http://www.xiph.org/ogg/vorbis/
+
+INSTALLATION
+
+Should be as simple as:
+
+	perl Makefile.PL
+	make
+	make install
+
+You can specify options to your hearts content if you know your way
+around the Perl MakeMaker toolset.
+
