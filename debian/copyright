@@ -1,4 +1,4 @@
-This package was written by Caleb Epstein cae@home.com on Mon, 23 Oct 2000 10:42:08 -0400.
+This is the debian package for the etree-scripts module.
+It was created by Caleb Epstein <cae@bklyn.org> using dh-make-perl.
 
-Copyright: GPL (see /usr/share/common-licenses/GPL)
-
+Copyright: Artistic (see /usr/share/common-licenses/Artistic)

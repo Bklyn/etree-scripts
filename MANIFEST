@@ -4,11 +4,8 @@ ChangeLog
 debian/changelog
 debian/control
 debian/copyright
-debian/dirs
-debian/files
 debian/README.debian
 debian/rules
-debian/substvars
 Etree/InfoFile.pm
 flacify
 make-toc
