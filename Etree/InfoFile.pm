@@ -53,8 +53,8 @@ my $numberwords = join ("|", keys %WORD2NUM);
 
 # Some regexps we use to recognize certain parts of the text file,
 # mostly taping related
-my $spots = qr/fob|dfc|btp|d?aud|d?sbd|on(\s*|-)stage|matrix|mix|balcony|
-  rail|stand/ix;
+my $spots = qr/fob|dfc|btp|d?aud|d?sbd|soundboard|on(\s*|-)stage|matrix|
+  mix|balcony|rail|stand/ix;
 my $mics = qr/caps|omni|cardioid|sc?ho?ep[sz]|neumann|mbho|akg|b&k|dpa|
   audio.technica/ix;
 my $configs = qr/\b(?:ortf|x[-\/]?y|degrees|blumlein|binaural|nos|din)\b/ix;
@@ -336,7 +336,7 @@ sub parseinfo {
 
       # looking for disc delimeters
       if (not $numsongs and not exists $self->{"Band"}
-	  and $line !~ /\b($venues|$states|$countries)\b/) {
+	  and $line !~ /\b($venues|$states|$countries|^(?:$datefmt))\b/ix) {
 	 $self->{"Band"} = $line;
       } elsif ($line =~ /^(source|src)\b/i or
 	       $line !~ /^((trans|x)fer|conver(ted|sion))\b/i and
@@ -374,8 +374,7 @@ sub parseinfo {
 	 $discnum = word2num ($2);
 	 $indisc = $discnum;
 	 $lastsong = 0;
-      } elsif ($line =~ /\bset\s*(\d+|$numberwords)\b/ix
-	       and $line !~ $trackre) {
+      } elsif ($line =~ /\bset\s*(\d+|$numberwords)\b/ix) {
 	 $set = word2num ($1);
       } elsif ($line =~ /^encore/i) {
 	 $set = "E";
@@ -438,10 +437,8 @@ sub parseinfo {
    if (not exists $self->{"Date"}
        and exists $self->{"Band"}
        and $self->{"Band"} =~ /^(.+)\s+((?:$datefmt).*)/ix) {
-      my $band = $1;
-      $band =~ s/\s+\W$//;	# Strip off possible trailing delimiter
-      $self->{"Band"} = $band;
       $self->{"Date"} = $2;
+      ($self->{"Band"} = $1) =~ s/\s+\W$//
    }
 
    # Still no date?  Try and get it from the directory name
@@ -457,6 +454,7 @@ sub parseinfo {
    # Sometimes Date and Venue get smushed together
    if (not exists $self->{"Venue"}
        and exists $self->{"Date"}
+       and defined $self->{"Date"}
        and $self->{"Date"} =~ /^($datefmt)\s*-?\s*(.+,\s*[A-Z][A-Z]\b.*)$/i) {
       $self->{"Date"} = $1;
       $self->{"Venue"} = $2;
@@ -470,7 +468,7 @@ sub parseinfo {
       $self->{"Venue"} = $2;
    }
 
-   if (exists $self->{"Date"}) {
+   if (exists $self->{"Date"} and defined $self->{"Date"}) {
       if ($have_date_parse) {
 	 my $time = str2time ($self->{"Date"});
 	 if (defined $time) {
