@@ -360,50 +360,19 @@ sub indexshns {
    }
 
    my $audioext = join ("|", @AUDIOEXT);
+   my $index = 1;
 
    foreach my $filename (sort @AUDIO) {
       my $file = basename $filename;
-
-      my ($disc, $track);
-
-      if ($file =~ /(?:d(\d+))?[-_\s]?(?:t|track)?(\d{2})(-fixed)?
-	  (\.wav)?\.($audioext)$/ix
-	  or $file =~ /(?:d(\d+))?[-_\s]?(?:t|track)?(\d+)(-fixed)?
-	  (\.wav)?\.($audioext)$/ix) {
-	 ($disc, $track) = (int ($1 || 1), int $2);
-	 if ($track > 100) {
-            my $idxdisc = int ($track / 100);
-	    if (defined $disc and $idxdisc != $disc) {
-	       warn "$progname: $file: can't make sense of " .
-		 "track number '$track'; this seems to be disc $disc, " .
-		   "but the track number indicates it may be disc $idxdisc\n";
-	       next;
- 	    } else {
- 	       $track %= 100;
- 	    }
-         }
-	 $disc ||= 1;
-      }
-
-      if (not defined $disc and not defined $track) {
-         warn "Can't parse filename: $file\n";
-      } else {
-	 my $index = 100 * $disc + $track;
-         $arg->{"ShnIndex"}{$index}{"Filename"} = $filename;
-	 my $duration = 0;
-	 $duration = shnlen ($filename) if $filename =~ /\.(shn|flac)$/;
-	 my $seconds = parsetime ($duration);
-	 $arg->{"Songs"}{$index}{"Time"} = $duration
-	   if $duration;
-	 $arg->{"Disc"}{$disc}{"Seconds"} += $seconds;
-	 $arg->{"Disc"}{$disc}{"Tracks"} = $track
-	   if not exists $arg->{"Disc"}{$disc}{"Tracks"}
-	     or $track > $arg->{"Disc"}{$disc}{"Tracks"};
-	 if (not exists $arg->{"Discs"} or $disc > $arg->{"Discs"}) {
-	    $arg->{"Discs"} = $disc;
-	 }
-      }
+      $arg->{"ShnIndex"}{$index}{"Filename"} = $filename;
+      my $duration = 0;
+      $duration = shnlen ($filename) if $filename =~ /\.(shn|flac)$/;
+      my $seconds = parsetime ($duration);
+      $arg->{"Songs"}{$index}{"Time"} = $duration if $duration;
+      ++$index;
    }
+
+   $arg->{"NumSongs"} = $index - 1;
 }
 
 # parsetitle - take the song title from a text file and strip off any
@@ -415,7 +384,7 @@ sub parsetitle {
 
    # Strip off any running time from the end of the title
    $title =~ s/\W?(\d+[:\.\']\d{2}([\":\.]\d{2}?)?)\W?/
-     $running_time = $1; ""; /e;
+     $running_time = $1; ""; /eg;
 
    # I've been seeing this a lot in some info files: whitespace,
    # dash, whitespace then the track timing.
@@ -454,11 +423,13 @@ sub parseinfo {
    my $arg = shift;
 
    my $discnum = 1;		# start with disc 1
+   my $index = 1;
    my $numsongs = 0;
    my $lastsong = 0;
    my $lastindex = 0;
    my $lastdisc = 1;
    my $indisc = 0;
+   my $haveall = 0;
    my $set;
 
    foreach my $line (@{$arg->{"InfoFileLines"}}) {
@@ -472,12 +443,6 @@ sub parseinfo {
 	  not exists $arg->{"Band"}
 	  and $line !~ /\b(silver wrapper|presents|spotlight)\b/ix) {
 	 $arg->{"Band"} = $line;
-      } elsif (not $numsongs
-	       and ($line =~ /($venues)/ix or $line =~ /\b($states)\b/
-		   or $line =~ /(.+)\s*-\s*(.+,\s*.+)/)
-	       and not $indisc) {
-	 $arg->{"Venue"} .= " - " if exists $arg->{"Venue"};
-	 $arg->{"Venue"} .= $line;
       } elsif ($line =~ /^(source|src):/i or
 	       $line !~ /^((trans|x)fer|conver(ted|sion)):?/i and
 	       $line =~ /\b($spots|$mics|$cables|$pres|$dats)\b/ix
@@ -487,6 +452,12 @@ sub parseinfo {
 	    $arg->{"Source"} .= " " if exists $arg->{"Source"};
 	    $arg->{"Source"} .= $line;
 	 }
+      } elsif (not $numsongs
+	       and ($line =~ /($venues)/ix or $line =~ /\b($states)\b/
+		   or $line =~ /(.+)\s*-\s*(.+,\s*.+)/)
+	       and not $indisc) {
+	 $arg->{"Venue"} .= " - " if exists $arg->{"Venue"};
+	 $arg->{"Venue"} .= $line;
       } elsif ($line =~ /^((?:trans|x)fer|conver(?:ted|sion))/i or
 	       $line =~ /\b($dats|$laptops|$digicards|$software)\b/ix
 	       and not $indisc) {
@@ -514,18 +485,14 @@ sub parseinfo {
 	 $set = "encore";
       } elsif ($line =~ /^(\d+)\s*(cd|dis[ck])s?/ix) {
 	 $arg->{"Discs"} = $1;
-      } elsif ($line =~ /^(?:d\d+)?t?(\d+) 	# sometimes you see d<n>t<m>
+      } elsif (not $haveall and
+	       $line =~ /^(?:d\d+)?t?(\d+) 	# sometimes you see d<n>t<m>
 	       \s* (?:[-\.:\)\]]+)? 		# whitespace, some punctuation
 	       (.*)/x				# the track title
-	       and int ($1) > 0
-	       # and not exists $arg->{"Songs"}{100 * $discnum + $1}{"Title"}
-	       # doesn't look like a date? why?
-	       # and $line !~ m@^\d{1,2}[-/\.]\d{1,2}[-/\.](?:\d{2}|\d{4})@
-	      ) {
+	       and int ($1) > 0) {
 	 my $songnum = int $1;
 	 my ($title, $segue, $notes, $runtime, $maybeset) = parsetitle ($2);
 	 $set = $maybeset if defined $maybeset;
-	 my $index = 100 * $discnum + $songnum;
 
 	 if ($lastsong and $songnum < $lastsong) {
 	    $indisc = ++$discnum;
@@ -540,8 +507,12 @@ sub parseinfo {
 		"runtime=$runtime set=$set\n";
 	 }
 
-	 $arg->{"Discs"} = $discnum;
-	 $arg->{"Disc"}{$discnum}{"Tracks"} = $songnum;
+	 $arg->{"Discs"} = $discnum
+	   if not exists $arg->{"Discs"} or
+	     $discnum > $arg->{"Discs"};
+	 $arg->{"Disc"}{$discnum}{"Tracks"} = $songnum
+	   if not exists $arg->{"Disc"}{$discnum}{"Tracks"} or
+	     $songnum > $arg->{"Disc"}{$discnum}{"Tracks"};
 	 $arg->{"Songs"}{$index}{"Disc"} = $discnum;
 	 $arg->{"Songs"}{$index}{"Track"} = $songnum;
 	 $arg->{"Songs"}{$index}{"Set"} = $set
@@ -551,14 +522,21 @@ sub parseinfo {
 	 $arg->{"Songs"}{$index}{"Notes"} = $notes if defined $notes;
 	 $arg->{"Songs"}{$index}{"Segue"} = $segue if defined $segue;
 	 $arg->{"Songs"}{$index}{"Time"} = $runtime
-	   if defined $runtime;
+	   if defined $runtime and not defined $arg->{"Songs"}{$index}{"Time"};
 	 $arg->{"Notes"}{$notes} = ""
 	   if defined $notes and not exists $arg->{"Notes"}{$notes};
 
+	 ++$index;
        	 ++$numsongs;
 	 $lastsong = $songnum;
 	 $lastdisc = $indisc = $discnum;
 	 $lastindex = $index;
+
+	 if ($numsongs == $arg->{"NumSongs"}) {
+	    print "Disc $discnum Song $songnum: have all needed song names\n"
+	      if $debug;
+	    $haveall = 1;
+	 }
       } elsif ($line =~ /^([\*\@\#\$\%\^]+)\s*[-=:]?\s*(.+)/
 	       and exists $arg->{"Notes"}{$1}) {
 	 $arg->{"Notes"}{$1} .= $2;
@@ -621,6 +599,7 @@ sub altparseinfo {
    my $songnum = 0;
    my $discnum = 1;		# start with disc 1
    my $numsongs = 0;
+   my $index = 1;
    my $indisc = 0;
    my $set;
 
@@ -650,8 +629,6 @@ sub altparseinfo {
 	      parsetitle ($line);
 	    $set = $maybeset if defined $maybeset;
 
-	    my $index = $discnum * 100 + $songnum;
-
 	    # check that there is a matching index in the shn's
 	    if (exists $arg->{"ShnIndex"}{$index}) {
 	       $arg->{"Discs"} = $discnum;
@@ -665,10 +642,14 @@ sub altparseinfo {
                $arg->{"Songs"}{$index}{"Time"} = $runtime
                   if defined $runtime;
 
-	       # Remove this from the "Etc" list if it is in ther
+	       # Remove this from the "Etc" list if it is in there
 	       if (exists $arg->{"Etc"}) {
 		  @{$arg->{"Etc"}} = grep { $_ ne $line } @{$arg->{"Etc"}};
 	       }
+
+	       ++$index;
+
+	       $indisc = 0 if $numsongs == $arg->{"NumSongs"};
 	    }
 	 }
       }
