@@ -41,6 +41,15 @@ my %EXES;
 my %URLS = ("metaflac" => "http://flac.sourceforge.net/",
 	    "flac" => "http://flac.sourceforge.net/");
 
+# On Windows, add the FLAC install dir to the PATH
+if ($^O eq "MSWin32") {		# Active State
+   die "Sorry, ActiveState Perl is too broken for this script to work.\n" .
+     "Please install Cygwin (http://www.cygwin.com/) instead.\n";
+} elsif ($^O eq "cygwin") {	# Cygwin
+   $ENV{"PATH"} .= ':/c/Program Files/FLAC'
+     if -d '/c/Program Files/FLAC';
+}
+
 # findexe - find a program in the PATH
 sub findexe {
    my $command = shift;
@@ -91,15 +100,17 @@ sub check_md5 {
 # compare it to a known-good digest string
 sub check_ffp {
    my ($file, $sum) = @_;
+   my ($dir, $base) = (dirname ($file), basename ($file));
 
-   my $cmd = "metaflac --show-md5sum \Q$file\E|";
+   chdir ($dir) or die "Can't chdir to $dir: $!\n";
 
-   findexe ($cmd) or die;
+   findexe ("metaflac") or die;
 
-   open (METAFLAC, $cmd) or return 1;
+   open METAFLAC, "-|", "metaflac", "--show-md5sum", $base
+     or return 1;
    my $hexdigest = <METAFLAC>;
    close METAFLAC;
-   chomp $hexdigest;
+   $hexdigest =~ s/\s+$//m;	# Remove \n or \r\n
 
    return ($hexdigest eq $sum) ? 0 : 1;
 }
@@ -264,6 +275,8 @@ sub check_flacfiles {
 	 print "Checking FLAC files in " . basename ($dir) . " (" .
 	   plural ($NUMFILES{$dir}, "file") . "):\n";
 
+	 chdir ($dir) or die "Can't chdir to $dir: $!\n";
+
 	 $lastdir = $dir;
       }
 
@@ -271,7 +284,7 @@ sub check_flacfiles {
 
       findexe ("flac") or die;
 
-      my $retcode = system ("flac", "-t", "-s", $file);
+      my $retcode = system ("flac", "-t", "-s", $base);
 
       my $exit_value  = $retcode >> 8;
       my $signal_num  = $retcode & 127;
