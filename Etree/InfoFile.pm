@@ -618,7 +618,18 @@ sub album {
 sub num_tracks {
    my $self = shift;
    my $disc = shift;
-   defined $disc ? $self->{Disc}{$disc}{Tracks} : scalar (@{$self->{Songs}});
+   my $num_tracks = 0;
+
+   if (defined $disc) {
+      if (exists $self->{Disc} and exists $self->{Disc}{$disc}) {
+	 $num_tracks = $self->{Disc}{$disc}{Tracks};
+      }
+   } else {
+      if (exists $self->{Songs}) {
+	 $num_tracks = scalar @{$self->{Songs}};
+      }
+   }
+   $num_tracks;
 }
 
 sub songs {
@@ -649,9 +660,10 @@ sub files {
    $self->findfiles unless exists $self->{Files};
 
    if (defined $ext) {
-      return sort keys %{$self->{ByExt}{lc $ext}};
+      return wantarray ? sort keys %{$self->{ByExt}{lc $ext}} :
+	scalar keys %{$self->{ByExt}{lc $ext}};
    }
-   return %{$self->{Files}};
+   wantarray ? %{$self->{Files}} : scalar keys %{$self->{Files}};
 }
 
 =item parse
