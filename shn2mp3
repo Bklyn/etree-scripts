@@ -6,6 +6,10 @@
 # to parse any info file stored with the SHN files to get information
 # like the band name, venue, track names and recording source.
 #
+# Latest version is always available from:
+#
+# http://bklyn.org/~cae/shn2mp3
+#
 # $Id$
 
 use strict;
@@ -228,7 +232,7 @@ sub readtext {
 	    $infofile = $NFO[0];
 	 } else {
 	    # Try and find best matching filename
-	    my $base = basename ($dir);
+	    (my $base = basename ($dir)) =~ s/\.(shn|ogg|flac\d*)f?$//;
 	    my @BEST;
 	    my $score = 0;
 
@@ -387,10 +391,10 @@ sub indexshns {
 	 my $index = 100 * $disc + $track;
          $arg->{"ShnIndex"}{$index}{"Filename"} = $filename;
 	 my $duration = 0;
-	 $duration = shnlen ($filename) if $filename =~ /\.shn$/;
+	 $duration = shnlen ($filename) if $filename =~ /\.(shn|flac)$/;
 	 my $seconds = parsetime ($duration);
 	 $arg->{"Songs"}{$index}{"Time"} = $duration
-	   if $filename =~ /\.shn$/i;
+	   if $duration;
 	 $arg->{"Disc"}{$disc}{"Seconds"} += $seconds;
 	 $arg->{"Disc"}{$disc}{"Tracks"} = $track
 	   if not exists $arg->{"Disc"}{$disc}{"Tracks"}
