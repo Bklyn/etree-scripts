@@ -11,8 +11,8 @@ install : $(SCRIPTS)
 	( cd $(prefix)/bin && ln -s unshn unflac )
 
 clean :
-	@echo Nothing to clean
+	@echo Nothing to do
 
-tarball :
-	tar cvfz ../etree-scripts.tar.gz $(SCRIPTS) unflac
-
+tarball : clean
+	( dir=`pwd`; base=`basename $$dir`; cd ..; \
+	  tar --exclude CVS --exclude .cvsignore -cvzf $$base.tar.gz $$base )
