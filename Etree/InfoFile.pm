@@ -30,22 +30,25 @@ my $numberwords = join ("|", keys %WORD2NUM);
 
 # Some regexps we use to recognize certain parts of the text file,
 # mostly taping related
-my $spots = 'fob|dfc|btp|d?aud|d?sbd|on(\s*|-)stage|matrix|mix|balcony|rail|stand';
-my $mics = 'caps|omni|cardioid|sc?ho?ep[sz]|neumann|mbho|akg|b&k|dpa|audio.technica';
-my $cables = 'kc5|actives?|patch(?:ed)?|coax|optical';
-my $pres = 'lunatec|apogee|ad1000|ad2k\+?|oade|sonosax|sbm-?1|' .
-  'usb-pre|mini[\s-]?me';
-my $dats = 'dat|pcm|d[378]|da20|d10|m1|sv-25[05]|da-?p1|tascam|sony|' .
-  'teac|aiwa|panasonic|hhb|portadat|44\.1(?:k(?:hz))|mini-?disc|fostex';
-my $laptops = 'laptop|dell|ibm|apple|toshiba|(power|i)-?book';
-my $digicards = 'ieee1394|s.?pdif|zefiro|za-?2|rme|digiface|sb-?live|fiji|' .
-  'turtle\sbeach|delta\sdio|event\sgina|montego|zoltrix';
-my $software = 'cd-?wave?|mkwact|shn(?:v3)?|shorten|samplitude|' .
-  'cool[-\s]?edit|sound.?forge|wavelab';
-my $venues = '(?:arts cent|theat)(?:er|re)|playhouse|arena|club|university|'.
-  'festival|lounge|room|cafe|field|house|airport|ballroom|college';
-my $states = 'A[LKZR]|CA|CO|CT|DE|FL|GA|HI|I[DLNA]|KS|KY|LA|M[AEDINSOT]|' .
-  'N[EVHJMYCD]|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|W[AVIY]|DC';
+my $spots = qr/fob|dfc|btp|d?aud|d?sbd|on(\s*|-)stage|matrix|mix|balcony|
+  rail|stand/ix;
+my $mics = qr/caps|omni|cardioid|sc?ho?ep[sz]|neumann|mbho|akg|b&k|dpa|
+  audio.technica/ix;
+my $configs = qr/\b(?:ortf|x[-\/]?y|degrees|blumlein|binaural|nos|din)\b/ix;
+my $cables = qr/kc5|actives?|patch(?:ed)?|coax|optical/ix;
+my $pres = qr/lunatec|apogee|ad1000|ad2k\+?|oade|sonosax|sbm-?1|
+  usb-pre|mini[\s-]?me/ix;
+my $dats = qr/dat|pcm|d[378]|da20|d10|m1|sv-25[05]|da-?p1|tascam|sony|
+  teac|aiwa|panasonic|hhb|portadat|44\.1(?:k(?:hz))|mini-?disc|fostex/ix;
+my $laptops = qr/laptop|dell|ibm|apple|toshiba|(power|i)-?book/ix;
+my $digicards = qr/ieee1394|s.?pdif|zefiro|za-?2|rme|digiface|sb-?live|fiji|
+  turtle\sbeach|delta\sdio|event\sgina|montego|zoltrix|prodif/ix;
+my $software = qr/cd-?wave?|mkwact|shn(?:v3)?|shorten|samplitude|
+  cool[-\s]?edit|sound.?forge|wavelab/ix;
+my $venues = qr/(?:arts cent|theat)(?:er|re)|playhouse|arena|club|university|
+  festival|lounge|room|cafe|field|house|airport|ballroom|college|hall/ix;
+my $states = qr/A[BLKZR]|BC|CA|CO|CT|DE|FL|GA|HI|I[DLNA]|KS|KY|LA|M[ABEDINSOT]|
+  N[BCDEFVHJMSY]|O[HKNR]|P[AQ]|PEI|QC|RI|S[CDK]|TN|TX|UT|VT|VA|W[AVIY]|DC/x;
 
 # A regex that matches most dates
 my $datefmt = qr/\d{4}[-\.\/]\d{1,2}[-\.\/]\d{1,2}|
@@ -86,7 +89,7 @@ sub findfiles {
 	       my $ext = extension ($_);
 	       return unless defined $ext;
 	       $self->{"Files"}{$File::Find::name} = { "ext" => lc $ext,
-						      "size" => -s $_};
+						       "size" => -s $_};
 	       $self->{"ByExt"}{lc $ext}{$File::Find::name} = 1;
 	    }, $dir);
 }
@@ -116,7 +119,13 @@ sub readtext {
    my $dir = $self->{"Directory"};
    my $infofile = $self->{"InfoFile"};
 
-   if (not defined $infofile) {
+   if (not defined $dir and defined $infofile) {
+      $self->{Directory} = $dir = dirname $infofile;
+   }
+
+   if (not defined $infofile and defined $dir) {
+      $self->findfiles;
+
       # Try and find any .txt or .nfo file in the current directory.
       my (@TXT, @NFO, @ALL);
       if (exists $self->{"ByExt"}{"txt"}) {
@@ -130,7 +139,7 @@ sub readtext {
       }
 
       if (not scalar @ALL) {
-	 warn "$dir: No txt or nfo files found.  Make one.\n";
+	 warn ref ($self) . "::readtext: No txt or nfo files found\n";
 	 return;
       }
 
@@ -160,8 +169,8 @@ sub readtext {
 	    }
 	    $infofile = $BEST[0];
 	    if (scalar @BEST > 1) {
-	       warn "$dir: Too many candiates for the info file (@BEST); " .
-		 "using $infofile\n";
+	       warn ref ($self) . "::readtext: Too many candiates for the " .
+		 "info file (@BEST); using $infofile\n";
 	    }
 	 }
       }
@@ -169,8 +178,13 @@ sub readtext {
       $self->{"InfoFile"} = $infofile;
    }
 
+   if (not defined $infofile) {
+      warn ref ($self) . "::readtext: No info file defined\n";
+      return;
+   }
+
    if (not open (INFOFILE, $infofile)) {
-      warn "$dir: Unable to open $infofile: $!\n";
+      warn ref ($self) . "::readtext: Unable to open $infofile: $!\n";
       return;
    }
 
@@ -247,7 +261,7 @@ sub parsetitle {
       $set = word2num ($1);
       $title = $2;
    } elsif ($title =~ /^e(?:ncore)?:\s*(.+)/i) {
-      $set = "encore";
+      $set = "E";
       $title = $1;
    }
 
@@ -285,11 +299,11 @@ sub parseinfo {
 
       # looking for disc delimeters
       if (not $numsongs and not exists $self->{"Band"}
-	  and $line !~ /\b(silver wrapper|presents|spotlight)\b/ix) {
+	  and $line !~ /\b($venues|$states)\b/) {
 	 $self->{"Band"} = $line;
       } elsif ($line =~ /^(source|src)\b/i or
 	       $line !~ /^((trans|x)fer|conver(ted|sion))\b/i and
-	       $line =~ /\b($spots|$mics|$cables|$pres|$dats)\b/ix
+	       $line =~ /\b($spots|$mics|$configs|$cables|$pres|$dats)\b/
 	       and not $indisc) {
 	 $line =~ s/^(source|src)\b:?\s*//i;
 	 if (length $line) {
@@ -297,12 +311,12 @@ sub parseinfo {
 	    $self->{"Source"} .= $line;
 	 }
       } elsif (not $numsongs
-	       and ($line =~ /($venues)/ix or $line =~ /\b($states)\b/)
+	       and ($line =~ $venues or $line =~ /\b$states\b/)
 	       and not $indisc) {
 	 $self->{"Venue"} .= " - " if exists $self->{"Venue"};
 	 $self->{"Venue"} .= $line;
       } elsif ($line =~ /^((?:trans|x)fer|conver(?:ted|sion))/i or
-	       $line =~ /\b($dats|$laptops|$digicards|$software)\b/ix
+	       $line =~ /($dats|$laptops|$digicards|$software)/
 	       and not $indisc) {
 	 $line =~ s/^((trans|x)fer|conver(ted|sion))\b:?\s*//i;
 	 if (length $line) {
@@ -325,7 +339,7 @@ sub parseinfo {
       } elsif ($line =~ /\bset\s*(\d+|$numberwords)\b/ix) {
 	 $set = word2num ($1);
       } elsif ($line =~ /^encore/i) {
-	 $set = "encore";
+	 $set = "E";
       } elsif ($line =~ /^(\d+)\s*(cd|dis[ck])s?/ix) {
 	 $self->{"Discs"} = $1;
       } elsif (not $haveall and
@@ -356,7 +370,7 @@ sub parseinfo {
 	     $songnum > $self->{"Disc"}{$discnum}{"Tracks"};
 	 $self->{"Songs"}[$index] = { Disc => $discnum,
 				      Track => $songnum,
-				      Index => $index + 1,
+				      Index => $index,
 				      Set => $set,
 				      Title => $title,
 				      Line => $line };
@@ -395,7 +409,8 @@ sub parseinfo {
    }
 
    # Still no date?  Try and get it from the directory name
-   if (not exists $self->{"Date"}) {
+   if (not exists $self->{"Date"} and exists $self->{Directory}
+       and defined $self->{Directory}) {
       my $base = basename $self->{"Directory"};
       if (defined $base and
 	  $base =~ /^.+-?(\d{2,4})-(\d{1,2})-(\d{1,2})(-.+)?\./) {
@@ -473,7 +488,7 @@ sub altparseinfo {
       } elsif ($line =~ /^\W*set\s*(\d+|$numberwords)\b/ix) {
 	 $set = word2num ($1);
       } elsif ($line =~ /^\W*encore\b/i) {
-	 $set = "encore";
+	 $set = "E";
       } elsif ($indisc) {
 	 # we are trying to interpret the case where the songs are not
 	 # numbered at all.  We will treat every non blank line as a
@@ -512,51 +527,39 @@ sub altparseinfo {
    }
 }
 
-# readmd5s - parse any md5 files and associate the sums with the
-# appropriate files
-sub readmd5s {
+sub _wrap {
    my $self = shift;
+   my @KEYS = @_;
+   my $value;
 
-   my @MD5FILES;
-   push (@MD5FILES, keys %{$self->{"ByExt"}{"md5"}})
-     if exists $self->{"ByExt"}{"md5"};
-
-   foreach my $md5file (@MD5FILES) {
-      my $dir = dirname $md5file;
-
-      open (MD5FILE, $md5file) or next;
-      local $/ = undef;
-      my $contents = <MD5FILE>;
-      close MD5FILE;
-
-      $contents =~ s/\r/\n/g;
-      my @LINES = split /\n/, $contents;
-
-      foreach (@LINES) {
-	 next unless /^([\da-f]{32})\s+\*?(.+)$/;
-	 my ($sum, $filename) = ($1, $2);
-	 if ($filename !~ m@/@) {
-	    $filename = "$dir/$filename";
-	 }
-	 $self->{"Files"}{$filename}{"md5"} = $sum;
+   foreach my $key (@KEYS) {
+      if (exists $self->{$key}) {
+	 $value = $self->{$key};
+	 last;
       }
    }
+   $value;
 }
 
-sub artist { my $self = shift; $self->{Band}; }
+sub artist { my $self = shift; $self->_wrap ("Band"); }
+sub date { my $self = shift; $self->_wrap ("CanonicalDate", "Date"); }
+sub year { my $self = shift; my $cd = $self->_wrap ("CanonicalDate");
+	   if (defined $cd) { return substr ($cd, 0, 4) }
+	   else { return 0 } }
+sub venue { my $self = shift; $self->_wrap ("Venue"); }
+sub source { my $self = shift; $self->_wrap ("Source"); }
+sub transfer { my $self = shift; $self->_wrap ("Transfer"); }
+sub taper { my $self = shift; $self->_wrap ("Taper"); }
+sub seeder { my $self = shift; $self->_wrap ("Seeder"); }
+sub num_discs { my $self = shift; $self->_wrap ("Discs"); }
 
 sub album {
    my $self = shift;
-   my $date = exists $self->{CanonicalDate} ? $self->{CanonicalDate} :
-     $self->{Date};
+   my $date = $self->date;
    my $album = (defined $date ? "$date " : "");
    $album .= $self->{Venue} if exists $self->{Venue};
    $album;
 }
-
-sub venue { my $self = shift; $self->{Venue}; }
-
-sub num_discs { my $self = shift; $self->{Discs}; }
 
 sub num_tracks {
    my $self = shift;
@@ -570,9 +573,37 @@ sub songs {
    @{$self->{Songs}};
 }
 
+sub notes {
+   my $self = shift;
+   my $note = shift;
+
+   if (defined $note) {
+      if (exists $self->{Notes}{$note}) {
+	 return $self->{Notes}{$note};
+      }
+   } else {
+      return %{$self->{Notes}};
+   }
+
+   undef;
+}
+
+sub files {
+   my $self = shift;
+   my $ext = shift;
+
+   $self->findfiles unless exists $self->{Files};
+
+   if (defined $ext) {
+      return sort keys %{$self->{ByExt}{lc $ext}};
+   }
+   return %{$self->{Files}};
+}
+
 sub parse {
    my $self = shift;
-   $self->findfiles;
+   my $infofile = shift;
+   $self->{InfoFile} = $infofile if defined $infofile;
    $self->readtext;
    $self->parseinfo;
 }
