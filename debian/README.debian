@@ -1,7 +1,7 @@
 The Debian Package etree-scripts
 --------------------------------
 
-A bunch of handy (to me at least) scripts for dealing with .shn files
-and burning them to a CD.
+A bunch of handy (to me at least) scripts for dealing with SHN and
+FLAC files.
 
-Caleb Epstein <cae@home.com>, Mon, 23 Oct 2000 10:42:08 -0400
+Caleb Epstein <cae at bklyn dot org>, Mon, 23 Oct 2000 10:42:08 -0400
