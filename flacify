@@ -112,6 +112,8 @@ sub convert_files {
    my $files = shift;
    my $dir = $info->{Directory};
 
+   chdir ($dir) or die "Couldn't change directory to $dir: $!\n";
+
    # 1. SHN -> WAV
    my @SHNS = grep { /\.shn$/i } @$files;
 
@@ -223,7 +225,7 @@ sub convert_files {
      "number of songs (" . scalar (@$songs) . ")\n"
        unless scalar @FLACS == scalar @$songs;
 
-   print "Tagging files\n";
+   print "Tagging files:\n";
 
    tag_files ($info, $songs, \@FLACS) or die "Error tagging files\n";
 
@@ -282,6 +284,10 @@ sub tag_files {
       delete $TAGS{"TITLE"};
       delete $TAGS{"COMMENT"};
 
+      # If running in --discs mode, tag files with DISCNUMBER and
+      # TRACKNUMBER.  Not all applications/devices honor the
+      # DISCNUMBER tag though, so this may leave you with all of your
+      # Track 1's sorting before all of your Track 2's.
       if ($tagdiscs) {
 	 $TAGS{"DISCNUMBER"} = $song->{Disc} if $song->{Disc};
 	 $TAGS{"TRACKNUMBER"} = $song->{Track} || ($index + 1);
@@ -298,7 +304,9 @@ sub tag_files {
 	 $TAGS{"COMMENT"} = $info->{Notes}{$note};
       }
 
-      print basename ($files->[$index]) . ": " . ($TAGS{TITLE} || "") . "\n";
+      print "" . sprintf ("%2d/%2d", $index + 1, $#$songs + 1) . ": " .
+	($TAGS{TITLE} || "") .
+	  (exists $TAGS{COMMENT} ? " ($TAGS{COMMENT})" : "") . "\n";
 
       my @TAGS;
       foreach my $tag (keys %TAGS) {
