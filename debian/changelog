@@ -1,3 +1,13 @@
+etree-scripts (2.3-1) unstable; urgency=low
+
+  * Cygwin improvements.
+  * flacify: Add ReplayGain information to files (--noreplay-gain to
+    disable).  Allow user to specify format of tags.  Make paths absolute
+    before chdir.
+  * Etree/InfoFile.pm: Handle missing Locale.pm
+
+ -- Caleb Epstein <cae@bklyn.org>  Thu,  2 Sep 2004 12:30:48 -0400
+
 etree-scripts (2.2-1) unstable; urgency=low
 
   * Fixed a bug in md5check; when checking a .md5 or .txt file, chdir to
