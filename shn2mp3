@@ -413,6 +413,10 @@ sub parsetitle {
    $title =~ s/\W?(\d+[:\.\']\d{2}([\":\.]\d{2}?)?)\W?/
      $running_time = $1; ""; /e;
 
+   # I've been seeing this a lot in some info files: whitespace,
+   # dash, whitespace then the track timing.
+   $title =~ s/\s+-\s*$//;
+
    # Strip off any trailing segue marker
    $title =~ s/\s*(-*\>)\s*$/ $segue = $1; "" /e;
 
