@@ -221,7 +221,7 @@ sub check_flacfiles {
 	    $lastfailed = scalar @FAILED;
 	 }
 
-	 print "Checking FLAC files in $dir (" .
+	 print "Checking FLAC files in " . basename ($dir) . " (" .
 	   plural ($NUMFILES{$dir}, "file") . "):\n";
 
 	 $lastdir = $dir;
