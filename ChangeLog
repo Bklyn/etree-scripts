@@ -1,5 +1,10 @@
 2004-02-13  Caleb Epstein  <cae at bklyn dot org>
 
+	* MANIFEST, META.yml, Makefile.PL, debian/control, debian/copyright, debian/dirs, debian/rules, debian/substvars:
+	Reworked debian dir using dh-make-perl
+
+	* ChangeLog: Release 2.0
+
 	* Makefile.PL: Removed "shn"; added "shn2ogg"
 
 	* debian/rules: Fixed "build" target
