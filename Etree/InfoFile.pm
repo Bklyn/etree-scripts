@@ -10,6 +10,7 @@ use strict;
 use File::Basename;
 use File::Find;
 use POSIX qw(strftime);
+use Locale::Country;
 
 eval "use Date::Parse";
 my $have_date_parse = not $@;
@@ -49,6 +50,8 @@ my $venues = qr/(?:arts cent|theat)(?:er|re)|playhouse|arena|club|university|
   festival|lounge|room|cafe|field|house|airport|ballroom|college|hall/ix;
 my $states = qr/A[BLKZR]|BC|CA|CO|CT|DE|FL|GA|HI|I[DLNA]|KS|KY|LA|M[ABEDINSOT]|
   N[BCDEFVHJMSY]|O[HKNR]|P[AQ]|PEI|QC|RI|S[CDK]|TN|TX|UT|VT|VA|W[AVIY]|DC/x;
+my $countries = join ("|", map { qq/$_/ } all_country_names);
+$countries = qr($countries);
 
 # A regex that matches most dates
 my $datefmt = qr/\d{4}[-\.\/]\d{1,2}[-\.\/]\d{1,2}|
@@ -299,7 +302,7 @@ sub parseinfo {
 
       # looking for disc delimeters
       if (not $numsongs and not exists $self->{"Band"}
-	  and $line !~ /\b($venues|$states)\b/) {
+	  and $line !~ /\b($venues|$states|$countries)\b/) {
 	 $self->{"Band"} = $line;
       } elsif ($line =~ /^(source|src)\b/i or
 	       $line !~ /^((trans|x)fer|conver(ted|sion))\b/i and
@@ -311,7 +314,9 @@ sub parseinfo {
 	    $self->{"Source"} .= $line;
 	 }
       } elsif (not $numsongs
-	       and ($line =~ $venues or $line =~ /\b$states\b/)
+	       and ($line =~ $venues or
+		    $line =~ /\b$states\b/ or
+		    $line =~ $countries)
 	       and not $indisc) {
 	 $self->{"Venue"} .= " - " if exists $self->{"Venue"};
 	 $self->{"Venue"} .= $line;
