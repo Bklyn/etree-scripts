@@ -12,12 +12,14 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 use File::Find;
-use Date::Parse;
 use Data::Dumper;
 use POSIX qw(strftime);
 use File::Copy;
 use IO::Handle;
 use Text::ParseWords;
+
+eval "use Date::Parse";
+my $have_date_parse = not $@;
 
 $File::Find::dont_use_nlink = 1; # Incase this is smbfs or whatever
 
@@ -56,8 +58,14 @@ $OUTPUT{"Band"} || "Unknown"
 $OUTPUT{"Date"} || "Unknown"
 |       Venue: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
 $OUTPUT{"Venue"} || "Unknown"
-|      Source: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
-$OUTPUT{"Source"} || "Unknown"
+|      Source: ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
+$OUTPUT{"Source"}
+| ~            ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
+$OUTPUT{"Source"}
+| ~            ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
+$OUTPUT{"Source"}
+| ~            ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< ... |
+$OUTPUT{"Source"}
 +-----------------------------------------------------------------------------+
  Track  Time  Title / Comments
 ------- ----- ----------------
@@ -119,7 +127,7 @@ my @AUDIOEXT = ("shn", "mp3", "ogg", "flac");
 # A regex that matches most dates
 my $datefmt = '\d{4}[-\.\/]\d{1,2}[-\.\/]\d{1,2}|' .
   '\d{1,2}[-\.\/]\d{1,2}[-\.\/]\d{2,4}|' .
-  '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2},?\s+\d{2,4}';
+  '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}(?:st|nd|rd|th),?\s+\d{2,4}';
 
 # extension - get the extension part of a filename
 sub extension {
@@ -265,7 +273,8 @@ sub parsetime {
    my $time = shift;
    my $seconds = 0;
 
-   if (defined $time and $time =~ /^(\d+)[:\.](\d{2})[:\.]?(\d{2})?$/) {
+   if (defined $time
+       and $time =~ /^(\d+)[:\.\'](\d{2})\"?(?:[:\.](\d{2}))?$/) {
       $seconds = 60.0 * $1 + $2 + ($3 || 0) / 75.0;
    }
 
@@ -335,8 +344,6 @@ sub indexshns {
 
       my ($disc, $track);
 
-      # $file =~ /(?:[-\s\._]*d?(\d{1,2}))?[-\s\._]*t?(\d{1,3})
-      # .*(\.wav)?\.(mp3|shn)$/ix) {
       if ($file =~ /(?:d(\d+))?[-_\s]?(?:t|track)?(\d{2})(-fixed)?
 	  (\.wav)?\.($audioext)$/ix
 	  or $file =~ /(?:d(\d+))?[-_\s]?(?:t|track)?(\d+)(-fixed)?
@@ -385,7 +392,7 @@ sub parsetitle {
    my ($segue, $notes, $running_time, $set);
 
    # Strip off any running time from the end of the title
-   $title =~ s/\W?(\d+[:\.]\d{2}([:\.]\d{2})?)\W?/
+   $title =~ s/\W?(\d+[:\.\']\d{2}([\":\.]\d{2}?)?)\W?/
      $running_time = $1; ""; /e;
 
    # Strip off any trailing segue marker
@@ -447,14 +454,16 @@ sub parseinfo {
 	 $arg->{"Venue"} .= $line;
       } elsif ($line =~ /^(source|src):/i or
 	       $line !~ /^((trans|x)fer|conver(ted|sion)):?/i and
-	       $line =~ /\b($spots|$mics|$cables|$pres|$dats)\b/ix) {
+	       $line =~ /\b($spots|$mics|$cables|$pres|$dats)\b/ix
+	       and not $indisc) {
 	 $line =~ s/^(source|src)\b:?\s*//i;
 	 if (length $line) {
 	    $arg->{"Source"} .= " " if exists $arg->{"Source"};
 	    $arg->{"Source"} .= $line;
 	 }
       } elsif ($line =~ /^((?:trans|x)fer|conver(?:ted|sion))/i or
-	       $line =~ /\b($dats|$laptops|$digicards|$software)\b/ix) {
+	       $line =~ /\b($dats|$laptops|$digicards|$software)\b/ix
+	       and not $indisc) {
 	 $line =~ s/^((trans|x)fer|conver(ted|sion))\b:?\s*//i;
 	 if (length $line) {
 	    $arg->{"Transfer"} .= " " if exists $arg->{"Transfer"};
@@ -472,7 +481,8 @@ sub parseinfo {
       } elsif ($line =~ /^\W*(c?d|dis[kc]|volume)\W*(\d+|$numberwords)\b/ix){
 	 $discnum = word2num ($2);
 	 $indisc = $discnum;
-      } elsif ($line =~ /\bset\s+(\d+|$numberwords)\b/ix) {
+	 $lastsong = 0;
+      } elsif ($line =~ /\bset\s*(\d+|$numberwords)\b/ix) {
 	 $set = word2num ($1);
       } elsif ($line =~ /^encore/i) {
 	 $set = "encore";
@@ -482,7 +492,7 @@ sub parseinfo {
 	       \s* (?:[-\.:\)\]]+)? 		# whitespace, some punctuation
 	       (.*)/x				# the track title
 	       and int ($1) > 0
-	       and not exists $arg->{"Songs"}{100 * $discnum + $1}{"Title"}
+	       # and not exists $arg->{"Songs"}{100 * $discnum + $1}{"Title"}
 	       # doesn't look like a date? why?
 	       # and $line !~ m@^\d{1,2}[-/\.]\d{1,2}[-/\.](?:\d{2}|\d{4})@
 	      ) {
@@ -491,16 +501,18 @@ sub parseinfo {
 	 $set = $maybeset if defined $maybeset;
 	 my $index = 100 * $discnum + $songnum;
 
-	 if ($debug) {
-	    local $SIG{__WARN__} = sub {};
-	    print "$line\n -> title=$title segue=$segue notes=$notes " .
-	      "runtime=$runtime set=$set\n";
+	 if ($lastsong and $songnum < $lastsong) {
+	    $indisc = ++$discnum;
+	    print "Crossed discs: d $discnum t $songnum ($lastsong)?\n"
+	      if $debug;
 	 }
 
-	 # DEBUG
-	 print "Crossed discs: d $discnum t $songnum?\n"
-	   if $songnum < $lastsong and exists $arg->{"Songs"}{$index}
-	     and $debug;
+	 if ($debug) {
+	    local $SIG{__WARN__} = sub {};
+	    print "$line\n -> disc=$discnum title=$title " .
+	      "segue=$segue notes=$notes " .
+		"runtime=$runtime set=$set\n";
+	 }
 
 	 $arg->{"Discs"} = $discnum;
 	 $arg->{"Disc"}{$discnum}{"Tracks"} = $songnum;
@@ -566,7 +578,7 @@ sub parseinfo {
       $arg->{"Venue"} = $2;
    }
 
-   if (exists $arg->{"Date"}) {
+   if (exists $arg->{"Date"} and $have_date_parse) {
       my $time = str2time ($arg->{"Date"});
       if (defined $time) {
 	 $arg->{"CanonicalDate"} = strftime ("%Y-%m-%d", localtime ($time));
@@ -804,7 +816,7 @@ sub shn_to_mp3 {
    $mp3file =~ s/(\.wav)?\.shn$/.mp3/i;
 
    my $artist = $info->{"Band"} || "Unknown";
-   my $album = $info->{"CanonicalDate"};
+   my $album = $info->{"CanonicalDate"} || $info->{"Date"} || "Unknown";
    my ($disc, $track) = (int ($index / 100), $index % 100);
    $track = $nth if $howmany < 256;
    my $title = $info->{"Songs"}{$index}{"Title"} || "";
@@ -820,7 +832,7 @@ sub shn_to_mp3 {
    if ($info->{"Venue"}) {
       $album .= " $info->{Venue}";
    }
-   my $year = substr ($info->{"CanonicalDate"}, 0, 4);
+   my $year = substr ($info->{"CanonicalDate"} || "0000", 0, 4);
    my $comment = $info->{"Source"} || "Encoded by $progname";
    my $tracktime = $info->{"Songs"}{$index}{"Time"} || "0:00";
    my $tracksecs = parsetime ($tracktime);
@@ -828,7 +840,8 @@ sub shn_to_mp3 {
    my $cmd = "shorten -x " . quotemeta ($file) . " - | $lame " .
      # For some reason which is not obvious, lame requires the input
      # to be byte-swapped when running in a pipeline on Windows.
-     ($^O eq "cygwin" ? "-x " : "") .
+     # CAE - 11/5/02 - seems to depend heavily on the LAME version
+     # ($^O eq "cygwin" ? "-x " : "") .
        "-b $bitrate -q $quality --add-id3v2" .
 	 " --tt " . quotemeta ($title) .
 	   " --ta " . quotemeta ($artist) .
@@ -936,8 +949,11 @@ foreach my $dir (@ARGV) {
 
    %OUTPUT = %INFO;
 
+   $OUTPUT{"Source"} ||= "Unknown";
+
    $^L = "\n";
    STDOUT->format_lines_left (0);
+   STDOUT->format_lines_per_page (99999);
 
    # Copy the info file
    if (not $test and exists $INFO{"InfoFile"}) {
