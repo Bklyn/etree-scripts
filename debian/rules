@@ -23,6 +23,7 @@ build-stamp:
 	dh_testdir
 
 	# Add here commands to compile the package.
+	perl Makefile.PL PREFIX=/usr
 	$(MAKE)
 
 	touch build-stamp
@@ -45,8 +46,7 @@ install: build
 	dh_installdirs
 
 	# Add here commands to install the package into debian/etreescripts.
-	perl Makefile.PL PREFIX=/usr
-	$(MAKE) install DESTDIR=$(CURDIR)/debian/etree-scripts \
+	$(MAKE) install DESTDIR=$(CURDIR)/debian/etree-scripts
 
 # Build architecture-independent files here.
 # Pass -i to all debhelper commands in this target to reduce clutter.
