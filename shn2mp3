@@ -39,6 +39,11 @@ my $help = 0;
 my %OUTPUT;
 my $rcfile = "$ENV{HOME}/.${progname}rc";
 my $output_type = ($progname =~ /(ogg|mp3)$/ ? $1 : "mp3");
+my %DECODER = ( "shn" => "shorten -x %FILE% -",
+		"flac" => "flac -d -s -c %FILE%",
+		"mp3" => "mpg123 -q -s %FILE%",
+		"ogg" => "oggdec -q -o - %FILE%");
+
 my %ENCODER = ( "mp3" => ("lame -b %BITRATE% -q %QUALITY% --add-id3v2 " .
 			  "--ta %ARTIST% --tl %ALBUM% --tt %TITLE% " .
 			  "--tc %COMMENT% --ty %YEAR% --tn %TRACK% " .
@@ -64,15 +69,19 @@ $OUTPUT{"Destination"}
 $OUTPUT{"Band"} || "Unknown"
 |        Date: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
 $OUTPUT{"Date"} || "Unknown"
-|       Venue: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
-$OUTPUT{"Venue"} || "Unknown"
+|       Venue: ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
+$OUTPUT{"Venue"}
+| ~            ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
+$OUTPUT{"Venue"}
+| ~            ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
+$OUTPUT{"Venue"}
 |      Source: ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
 $OUTPUT{"Source"}
 | ~            ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
 $OUTPUT{"Source"}
 | ~            ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
 $OUTPUT{"Source"}
-| ~            ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< ... |
+| ~            ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
 $OUTPUT{"Source"}
 +-----------------------------------------------------------------------------+
  Track  Time  Title / Comments
@@ -141,7 +150,7 @@ my $datefmt = '\d{4}[-\.\/]\d{1,2}[-\.\/]\d{1,2}|' .
 # extension - get the extension part of a filename
 sub extension {
    my $filename = shift;
-   my $ext = $_;
+   my $ext = $filename;
    return if $ext =~ /(^(bak|orig)$|~$)/;
    $ext =~ s/^.+\.([^\.]+)$/$1/;
    $ext;
@@ -800,7 +809,7 @@ sub mkdir_p {
 sub outputdir {
    my $dir = shift;
    my $outputdir = "$target/" . basename ($dir);
-   $outputdir =~ s/(\.shnf?)?$/.${output_type}f/i;
+   $outputdir =~ s/(\.(shnf?|flac\d{0,2}f?|oggf?|mp3f?))?$/.${output_type}f/i;
    $outputdir;
 }
 
@@ -823,8 +832,9 @@ sub shn_to_lossy {
 
    mkdir_p $outputdir unless $test or -d $outputdir;
 
+   my $audioext = join ("|", @AUDIOEXT);
    my $outfile = "$outputdir/" . basename $file;
-   $outfile =~ s/(\.wav)?\.shn$/.$output_type/i;
+   $outfile =~ s/(\.wav)?\.($audioext)$/.$output_type/i;
 
    my $artist = $info->{"Band"} || "Unknown";
    my $album = $info->{"CanonicalDate"} || $info->{"Date"} || "Unknown";
@@ -848,6 +858,14 @@ sub shn_to_lossy {
    my $tracktime = $info->{"Songs"}{$index}{"Time"} || "0:00";
    my $tracksecs = parsetime ($tracktime);
 
+   my $input_type = extension ($file);
+
+   if (not exists $DECODER{$input_type}) {
+      print "$progname: Don't know how to decode \U$input_type\E input file $file\n";
+      return;
+   }
+
+   my $decoder = $DECODER{$input_type};
    my $encoder = $ENCODER{$output_type};
 
    if ($quality eq "fast") {
@@ -856,6 +874,7 @@ sub shn_to_lossy {
       $quality = $output_type eq "mp3" ? 2 : 7;
    }
    
+   $decoder =~ s/%FILE%/\Q$file\E/g;
    $encoder =~ s/%BITRATE%/$bitrate/g;
    $encoder =~ s/%QUALITY%/$quality/g;
    $encoder =~ s/%ARTIST%/\Q$artist\E/g;
@@ -867,8 +886,7 @@ sub shn_to_lossy {
    $encoder =~ s/%ENCODEROPTS%/$encoderopts/g;
    $encoder =~ s/%OUTFILE%/$outfile/g;
 
-   my $cmd = "shorten -x " . quotemeta ($file) . " - | $encoder" .
-     ($debug ? "" : " > /dev/null 2>&1");
+   my $cmd = "$decoder | $encoder " . ($debug ? "" : " > /dev/null 2>&1");
    
    my $skip = (-f $outfile and -M $outfile < -M $file and not $force);
 
@@ -881,6 +899,8 @@ sub shn_to_lossy {
    $OUTPUT{"Track"} = sprintf (($howmany > 99
 				? "%3d/%3d" : "%2d/%2d"), $nth, $howmany);
    $OUTPUT{"Time"} =~ s/\.\d+$//;
+   $OUTPUT{"Venue"} ||= "Unknown";
+
    write;
 
    print "Command line: $cmd\n" if $debug;
