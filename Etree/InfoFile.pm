@@ -32,7 +32,8 @@ use strict;
 use File::Basename;
 use File::Find;
 use POSIX qw(strftime);
-use Locale::Country;
+eval "use Locale::Country";
+my $have_locale = not $@;
 
 eval "use Date::Parse";
 my $have_date_parse = not $@;
@@ -73,7 +74,18 @@ my $venues = qr/(?:arts cent|theat)(?:er|re)|playhouse|arena|club|university|
   auditorium/ix;
 my $states = qr/A[BLKZR]|BC|CA|CO|CT|DE|FL|GA|HI|I[DLNA]|KS|KY|LA|M[ABEDINSOT]|
   N[BCDEFVHJMSY]|O[HKNR]|P[AQ]|PEI|QC|RI|S[CDK]|TN|TX|UT|VT|VA|W[AVIY]|DC/x;
-my $countries = join ("|", map { qq/$_/ } all_country_names);
+my $countries;
+if ($have_locale) {
+   # Large list of all countries Perl knows about
+   $countries = join ("|", map { qr/$_/ } all_country_names ());
+} else {
+   # Small list of countries we might see
+   $countries = 'Japan|England|Ireland|Brazil|Jamaica|United\s+Kingdom|Italy|'.
+     'South\s+Africa|Sweden|Portugal|Israel|Egypt|Norway|France|India|' .
+       'Finland|United\s+States|China|Mexico|Costa\s+Rica|Ecuador|' .
+	 'New\s+Zealand|Puerto\s+Rico|Djibouti'; # shake it!
+}
+
 $countries = qr($countries);
 my $trackre = qr/^\s*(?:d\d+)?t?(\d+) 	# sometimes you see d<n>t<m>
   \s* (?:[[:punct:]]+)? 		# whitespace, some punctuation
@@ -173,7 +185,7 @@ sub readtext {
       # Try and find any .txt or .nfo file in the current directory.
       my (@TXT, @NFO, @ALL);
       if (exists $self->{"ByExt"}{"txt"}) {
-	 push (@TXT, keys %{ $self->{"ByExt"}{"txt"}});
+	 push (@TXT, grep { not m/ffp/i } keys %{ $self->{"ByExt"}{"txt"}});
 	 push (@ALL, @TXT);
       }
 
