@@ -107,7 +107,7 @@ sub check_ffp {
 
    findexe ("metaflac") or die;
 
-   open METAFLAC, "-|", "metaflac", "--show-md5sum", $base
+   open (METAFLAC, "-|", "metaflac", "--show-md5sum", $base)
      or return 1;
    my $hexdigest = <METAFLAC>;
    close METAFLAC;
