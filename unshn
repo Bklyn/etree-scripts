@@ -60,7 +60,7 @@ my $have_audio_wav = not $@;
 
 # The file types we support, by extension
 my %DECODERS = ( "shn" => 'shorten -x @@FILE@@ @@WAVFILE@@',
-		 "flac" => 'flac -d -o @@WAVFILE@@ @@FILE@@',
+		 "flac" => 'flac --silent -d -o @@WAVFILE@@ @@FILE@@',
 		 "mp3" => 'mpg123 -q -w @@WAVFILE@@ @@FILE@@',
 		 "ogg" => 'oggdec -o @@WAVFILE@@ @@FILE@@');
 
@@ -79,8 +79,12 @@ sub seconds_to_mmssff {
 sub waveinfo {
    return unless $have_audio_wav;
    my $file = shift;
-   my $wav = new Audio::Wav;
-   my $read = $wav->read ($file);
+   my $wav = new Audio::Wav or return;
+   $wav->set_error_handler ( sub { my %E = @_;
+				   return if $E{"warning"};
+				   die "Error: $E{filename}: $E{message}}\n";
+				} );
+   my $read = $wav->read ($file) or return;
    my $details = $read->details();
    return unless $details;
    my $frames = 75 * $details->{"data_length"} / $details->{"bytes_sec"};
