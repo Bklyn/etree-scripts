@@ -33,8 +33,7 @@ $File::Find::dont_use_nlink = 1; # Incase this is smbfs or whatever
 
 my %BANDS;
 (my $progname = basename $0) =~ s/\.pl$//;
-my $version = '$Revision$ ';
-$version =~ s/^.Revision:\s+//; $version =~ s/\s*\$\s*$//;
+(my $version = q$Revision$) =~ s/^Revision: ([\d\.]+).*/$1/;
 my $debug = 0;
 my $writefiles = 0;
 my $force = 0;
@@ -45,7 +44,6 @@ my $preset;
 my $altpreset = "standard";
 my $target = ".";
 my $test = 0;
-my $help = 0;
 my %OUTPUT;
 my $rcfile = "$ENV{HOME}/.${progname}rc";
 my $output_type = ($progname =~ /(ogg|mp3)$/ ? $1 : "mp3");
@@ -179,37 +177,6 @@ sub bytes_to_human {
    $nbytes;
 }
 
-sub usage {
-   $0 = basename $0;
-
-   print <<EOF;
-$0 - Convert SHN files into lossy-compressed \U$output_type\E files
-
-Usage: $0 [options] path-to-shns
-
-Options:
-  --encoder-options "x" Additional arguments to pass to the \U$output_type\E encoder.
-  -b | --bitrate b      Specify a constant bit-rate encoding instead of a VBR
-                        preset.  This is also used when encoding OGG files.
-                        Default is 192.
-  -q | --quality q      Set oggenc encoding quality.  Worst is 0, best is 10.
-                        Default is 3.
-  --alt-preset p        Specify LAME encoder VBR alt-preset (deprecated, but
-                        "standard" is the default).
-  --preset p            Specify LAME encoder preset.  Overrides --alt-preset.
-  --target t            Root directory where MP3s will be written.  Default is
-                        the current working directory.
-  --force               Force overwriting of existing MP3s.
-  --test                Just print what would be done; do not encode anything.
-  --mp3                 Generate MP3 output.  This is the default if the script
-                        is invoked as "shn2mp3".
-  --ogg                 Generate OGG output.  This is the default if the script
-                        is invoked as "shn2ogg".
-  --help                Generate this usage message and exit.
-EOF
-   ;
-}
-
 if (-f $rcfile and open (RCFILE, $rcfile)) {
    local $/ = 0;		# Slup the whole file
    unshift (@ARGV, shellwords (<RCFILE>));
@@ -234,14 +201,16 @@ my $retval = GetOptions ("lameopts=s" => \$encoderopts,
 			 "h|high-quality" => sub { $quality = "high"; },
 			 "force!" => \$force,
 			 "debug!" => \$debug,
-			 "help!" => sub { usage; exit (0); },
+			 "help!" => sub {
+			    use Pod::Usage;
+			    pod2usage (-verbose => 1, -exitval => 0); },
 			 "mp3!" => sub { $output_type = "mp3"; },
 			 "ogg!" => sub { $output_type = "ogg"; },
 			 "version!" => sub { version(); exit (0); });
 
-if ($retval == 0 or $help or not scalar @ARGV) {
-   usage;
-   exit (not $help);
+if ($retval == 0 or not scalar @ARGV) {
+   use Pod::Usage;
+   pod2usage (-verbose => 1, -exitval => 1);
 }
 
 my %EXES;
@@ -431,7 +400,7 @@ sub lossless_to_lossy {
 
    write;
 
-   print "Command line: $cmd\n" if $debug;
+   print "Command line: $cmd\n" if $debug or $test;
 
    my $status = 0;
    my $start = time;
@@ -523,3 +492,126 @@ foreach my $dir (@ARGV) {
 	or die "Error converting $FILES[$index] to $output_type\n";
    }
 }
+
+__END__
+
+=head1 NAME
+
+shn2mp3 - Convert audio files to lossily-compressed MP3 or OGG files
+with tags.
+
+=head1 SYNOPSIS
+
+shn2mp3 [options] directory [directory ...]
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--help>
+
+Generate this usage message and exit.
+
+=item B<-b> | B<--bitrate> I<n>
+
+Specify a constant bit-rate (CBR) encoding in kbits/second.  This
+overrides B<--preset> and B<--alt-preset>.  The default value is 192.
+
+=item B<-q> | B<--quality> I<n>
+
+Specify the encoding quality when using CBR encoding mode.  The
+meaning of this number depends on the encoder being used.  For the
+L<lame> encoder, it is a number from 0 to 9 with 0 being the highest
+quality and 9 being the lowest.  For the L<oggenc> encoder, it is a
+number from -1 to 10 with -1 being the lowest and 10 being the
+highest.
+
+=item B<--alt-preset> I<standard|extreme|insane|...>
+
+When using L<lame>, specify an --alt-preset VBR encoding method.  The
+default encoding method uses --alt-preset standard.  Note: alt-presets
+are deprecated in favor of the presets.
+
+=item B<--preset> I<standard|extreme|insane|...>
+
+When using L<lame>, specify a --preset VBR encoding method.  This
+overrides --alt-preset and --bitrate.  See the output of C<lame
+--preset help> for a list of valid presets.
+
+=item B<--target> I<directory>
+
+Specify the base output directory where the output files will be
+written.  The ultimate output directory will be a subdirectory of this
+directory whose name is taken from the basename of the source
+directory with ".mp3f" added to the end.  For example the output
+directory for ph2004-01-01.shnf is I<target>/ph2004-01-01.mp3f
+
+=item B<--force>
+
+By default, any pre-existing MP3/OGG files will not be overwritten by
+L<shn2mp3>.  This flag will cause existing files to be replaced.
+
+=item B<--test>
+
+Don't actually do the encoding, just print what would be done.  Useful
+to verify that the info file has been parsed correctly.
+
+=item B<--mp3>
+
+Force MP3 output using L<lame>.  This is the default if the script is
+invoked as C<shn2mp3>.
+
+=item B<--ogg>
+
+Force OGG Vorbis output using L<oggenc>.  This is the default if the
+script is invoked as C<shn2ogg>.
+
+=back
+
+=head1 DESCRIPTION
+
+The purpose of L<shn2mp3> is to convert audio files from a
+losslessly-compressed format like L<shorten> or L<flac> to
+lossily-compressed MP3 or OGG files with tags.
+
+In actuality, L<shn2mp3> can handle input files in L<shorten>,
+L<flac>, L<ogg> and L<mp3> formats.  As a result, its name should
+probably be L<lossify>.
+
+For each directory supplied by the user, L<shn2mp3> will do the
+following:
+
+=over
+
+=item Parse
+
+The directory is processed by the L<Etree::InfoFile> module, which
+searches for audio and text files.  Text files are parsed for the name
+of the artist, venue, date, song names, recording source, and other
+information.  This information is used for tagging the resulting
+output files.
+
+If no text files can be found, an error is emitted and the directory is
+not processed.
+
+=item Transcode
+
+Each audio file is run through a transcoding pipeline which converts
+the source file to WAVE format and then takes that WAVE audio and
+compresses it to MP3 or OGG Vorbis format.  The files are tagged with
+the information found by the L<Etree::InfoFile> module.
+
+=back
+
+=head1 VERSION
+
+$Id$
+
+=head1 SEE ALSO
+
+L<shorten>, L<flac>, L<lame>, L<oggenc>, L<shntool>,
+L<Etree::InfoFile>, L<flacify>
+
+=head1 AUTHOR
+
+Caleb Epstein E<lt>cae at bklyn dot orgE<gt>

@@ -11,10 +11,12 @@
 use strict;
 use File::Find;
 use File::Basename;
+use File::Spec;
 
 $File::Find::dont_use_nlink = 1;
 
 eval "use Digest::MD5";
+
 if ($@) {
    die <<EOF
 You must install the Digest::MD5 Perl module for this script to work.  This
@@ -32,9 +34,41 @@ EOF
   ;
 }
 
-my $progname = basename $0; $progname =~ s/\.pl$//;
-my $checksum_regex = '\b[\da-f]{32}\b';
+(my $progname = basename $0) =~ s/\.pl$//;
+my $checksum_regex = qr/\b[\da-f]{32}\b/;
 my %HAVE_SUMS;
+my %EXES;
+my %URLS = ("metaflac" => "http://flac.sourceforge.net/",
+	    "flac" => "http://flac.sourceforge.net/");
+
+# findexe - find a program in the PATH
+sub findexe {
+   my $command = shift;
+   my ($exe, $rest) = split (/ /, $command, 2);
+
+   return $EXES{$exe} if exists $EXES{$exe};
+
+   my $fullpath;
+
+   $fullpath = $exe if $exe =~ m@^/@ and -x $exe;
+
+   if (not defined $fullpath) {
+      my @PATH = File::Spec->path();
+      foreach my $dir (@PATH) {
+	 if (-x "$dir/$exe") {
+	    $fullpath = "$dir/$exe";
+	    last;
+	 }
+      }
+   }
+
+   if (not defined $fullpath) {
+      die "Unable to find `$exe' in your PATH." .
+	(exists $URLS{$exe} ? "  Try $URLS{$exe}" : "") . "\n";
+   }
+
+   $EXES{$exe} = $fullpath;
+}
 
 # check_md5 - compute the MD5 digest of a file and compare it to a
 # known-good digest string
@@ -58,7 +92,11 @@ sub check_md5 {
 sub check_ffp {
    my ($file, $sum) = @_;
 
-   open (METAFLAC, "metaflac --show-md5sum \Q$file\E|") or return 1;
+   my $cmd = "metaflac --show-md5sum \Q$file\E|";
+
+   findexe ($cmd) or die;
+
+   open (METAFLAC, $cmd) or return 1;
    my $hexdigest = <METAFLAC>;
    close METAFLAC;
    chomp $hexdigest;
@@ -231,6 +269,8 @@ sub check_flacfiles {
 
       print " checking $base: ";
 
+      findexe ("flac") or die;
+
       my $retcode = system ("flac", "-t", "-s", $file);
 
       my $exit_value  = $retcode >> 8;
@@ -315,3 +355,91 @@ if ($ok or $errors or $missing) {
 }
 
 exit (0 | ($errors ? 1 : 0) | ($missing ? 2 : 0));
+
+__END__
+
+=head1 NAME
+
+md5check - Recursively verify files against external MD5 checksums
+
+=head1 SYNOPSIS
+
+md5check [directory [directory ...]]
+
+=head1 DESCRIPTION
+
+The purpose of L<md5check> is to verify that a file or set of files
+agree with MD5 checksums stored in some external file.
+
+You can specify a list of directories on the command line; the current
+working directory is used if no directory name is supplied.
+
+For each specified directory, L<md5check> recursively searches for any
+files whose names end in C<.md5>, C<.txt>, C<.ffp>, or C<.flac>.
+
+=over
+
+=item Text Files
+
+The first three file types are considered to be plain text, and
+L<md5check> reads them looking for lines that look like MD5 checksums,
+which are simply "words" of 32 hexadecimal digits.  These lines can be
+either of the form:
+
+C<filename:[:xdigit:]{32}>
+
+in which case they are taken to be L<"FLAC fingerprints">, or
+
+C<[:xdigit:]{32}\s+\*?filename\s*>
+
+in which case they are taken to be L<"MD5 checksums">.  These two
+different types of lines are handled as follows:
+
+=over
+
+=item FLAC fingerprints
+
+When a FLAC fingerprint is detected, md5check will run the command
+C<metaflac --show-md5sum> on the associated file and compare that
+output to the checksum given in the FLAC fingerprint.  If the two do
+not match, an error message is emitted.  If the file is missing, a
+warning is emitted.
+
+=item MD5 checksums
+
+When an MD5 checksum is detected, L<md5check> will use the
+L<Digest::MD5> module to compute its own MD5 hash on the file.  If the
+results do not match, an error message is emitted.  If the file is
+missing, a warning is emitted.
+
+=back
+
+=item FLAC Files
+
+For files whose names end in C<.flac>, L<md5check> will run the
+command C<flac -t -s>, which performs an integrity check on the file
+data.  If this command returns an error code, an error message is
+emuitted.
+
+=back
+
+=head1 EXIT CODE
+
+The exit status of the L<md5sum> command is derived from the results
+of all the files it has checked.  If no errors were encountered, the
+exit status is 0.  Otherwise, the exit status will be the 1 if any
+errors were encountered or 2 if any files were missing (warnings).  If
+there were both errors and missing files, the exit status will be 3
+(and 3 shall be the number of the counting!)
+
+=head1 VERSION
+
+$Id$
+
+=head1 SEE ALSO
+
+L<md5sum>, L<flac>, L<metaflac>, L<Digest::MD5>
+
+=head1 AUTHOR
+
+Caleb Epstein E<lt>cae at bklyn dot orgE<gt>
