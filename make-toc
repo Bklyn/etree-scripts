@@ -1,0 +1,33 @@
+#!/usr/bin/perl -w
+#
+# make-toc - spit out a table-of-contents file for cdrdao from the
+# current directory of WAV files or from a list of WAV files on the
+# command line
+#
+# $Id$
+
+use File::Find;
+
+$File::Find::dont_use_nlink = 1;
+
+my @SHNS = @ARGV;
+
+if (not scalar @SHNS) {
+   sub wanted {
+      my $file = $File::Find::name;
+      push (@SHNS, $file) if -f $file and $file =~ /\.wav$/i;
+   }
+   find (\&wanted, ".");
+}
+
+die "No WAVE files found.\n" unless scalar @SHNS;
+
+print "CD_DA\n";
+
+my $silence = "SILENCE 00:02:00\n";
+
+foreach (@SHNS)  {
+   my $file = $_;
+   print "TRACK AUDIO\n${silence}FILE \"$file\" 0\n";
+   $silence = "";
+}
