@@ -1,3 +1,9 @@
+#!/usr/bin/perl
+#
+# MakeMaker script for etree-scripts
+#
+# $Id$
+
 use ExtUtils::MakeMaker;
 
 WriteMakefile (
