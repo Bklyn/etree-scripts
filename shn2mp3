@@ -394,9 +394,6 @@ sub parsetitle {
    # Strip off any "notes" indicators like @, #, $, %, ^, and *
    $title =~ s/\s*([\*\@\#\$\%\^]+)\s*$/ $notes = $1; "" /e;
 
-   # Now strip off any other trailing non-word characters
-   # $title =~ s/\W+$//;
-
    # remove leading and trailing whitespace
    $title =~ s/^\s+//; $title =~ s/\s+$//;
 
@@ -443,7 +440,8 @@ sub parseinfo {
 	  and $line !~ /\b(silver wrapper|presents|spotlight)\b/ix) {
 	 $arg->{"Band"} = $line;
       } elsif (not $numsongs
-	       and ($line =~ /($venues)/ix or $line =~ /\b($states)\b/)
+	       and ($line =~ /($venues)/ix or $line =~ /\b($states)\b/
+		   or $line =~ /(.+)\s*-\s*(.+,\s*.+)/)
 	       and not $indisc) {
 	 $arg->{"Venue"} .= " - " if exists $arg->{"Venue"};
 	 $arg->{"Venue"} .= $line;
@@ -480,15 +478,24 @@ sub parseinfo {
 	 $set = "encore";
       } elsif ($line =~ /^(\d+)\s*(cd|dis[ck])s?/ix) {
 	 $arg->{"Discs"} = $1;
-      } elsif ($line =~ /^(?:d\d+)?t?(\d+)\s*(?:\s*[-\.:\)\]]+)?(.+)/
-	       and int $1
+      } elsif ($line =~ /^(?:d\d+)?t?(\d+) 	# sometimes you see d<n>t<m>
+	       \s* (?:[-\.:\)\]]+)? 		# whitespace, some punctuation
+	       (.*)/x				# the track title
+	       and int ($1) > 0
 	       and not exists $arg->{"Songs"}{100 * $discnum + $1}{"Title"}
-	       and $line !~ m@^\d{1,2}[-/\.]\d{1,2}[-/\.](?:\d{2}|\d{4})@) {
+	       # doesn't look like a date? why?
+	       # and $line !~ m@^\d{1,2}[-/\.]\d{1,2}[-/\.](?:\d{2}|\d{4})@
+	      ) {
 	 my $songnum = int $1;
 	 my ($title, $segue, $notes, $runtime, $maybeset) = parsetitle ($2);
 	 $set = $maybeset if defined $maybeset;
-
 	 my $index = 100 * $discnum + $songnum;
+
+	 if ($debug) {
+	    local $SIG{__WARN__} = sub {};
+	    print "$line\n -> title=$title segue=$segue notes=$notes " .
+	      "runtime=$runtime set=$set\n";
+	 }
 
 	 # DEBUG
 	 print "Crossed discs: d $discnum t $songnum?\n"
