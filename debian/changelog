@@ -1,3 +1,13 @@
+etree-scripts (2.1-1) unstable; urgency=low
+
+  * md5check, flacify: add c:\program files\flac to PATH when running
+    under Cygwin.  Bark loudly if ActiveState is being used.  Change
+    working directory and pass unqualified filenames to flac, etc.
+  * unshn: fix call to sprintf when sample rate != 44.1 kHz
+  * Etree/InfoFile: parsing improvements
+
+ -- Caleb Epstein <cae@bklyn.org>  Wed, 14 Apr 2004 08:30:56 -0400
+
 etree-scripts (2.0-1) unstable; urgency=low
 
   * Modularized text file parsing (finally) as Etree::InfoFile
