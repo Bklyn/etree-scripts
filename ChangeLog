@@ -1,4 +1,18 @@
+2004-04-20  Caleb Epstein  <cae at bklyn dot org>
+
+	* Makefile.PL, debian/changelog: Release 2.2 (bugfix)
+
+2004-04-19  Caleb Epstein  <cae at bklyn dot org>
+
+	* md5check:
+	Bug fix for the "check_file" routine.  Need to chdir to the directory
+	holding the file and use relative paths.
+
 2004-04-14  Caleb Epstein  <cae at bklyn dot org>
+
+	* shn2mp3: Need to chdir
+
+	* ChangeLog: etree-scripts 2.1
 
 	* Etree/InfoFile.pm: More parsing improvements
 

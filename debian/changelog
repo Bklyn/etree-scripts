@@ -1,3 +1,10 @@
+etree-scripts (2.1-2) unstable; urgency=low
+
+  * Fixed a bug in md5check; when checking a .md5 or .txt file, chdir to
+    its directory so relative paths work properly.
+
+ -- Caleb Epstein <cae@bklyn.org>  Tue, 20 Apr 2004 08:13:28 -0400
+
 etree-scripts (2.1-1) unstable; urgency=low
 
   * md5check, flacify: add c:\program files\flac to PATH when running

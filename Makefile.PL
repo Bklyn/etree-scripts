@@ -9,8 +9,8 @@ use ExtUtils::MakeMaker;
 WriteMakefile (
 	       NAME => "etree-scripts",
 	       ABSTRACT => "Useful scripts for managing, converting, " .
-	       			"and burning losslessly compressed audio files",
-	       VERSION => "2.1",
+	       		   "and burning losslessly compressed audio files",
+	       VERSION => "2.2",
 	       AUTHOR => 'Caleb Epstein <cae@bklyn.org>',
 
 	       EXE_FILES => [ "md5check", "unshn", "burn-shns",
