@@ -1,0 +1,94 @@
+#!/usr/bin/perl -w
+#
+# cdfill - given a list of WAV and/or SHN files, calculate the
+# maximally-filled CD layout for them.  If --rename is specified, the
+# files are renamed to look like <prefix>d<n>t<nn>.<suffix>.  Doesn't
+# take into account breaking up jams or segues :)
+#
+# Author: Caleb Epstein <cae at bklyn dot org>
+#
+# $Id$
+
+
+use Getopt::Long;
+
+push (@ARGV, glob ("*.wav *.shn *.WAV *.SHN")) unless scalar @ARGV;
+
+my $rename = 0;
+my $prefix;
+my $cdlen = 74;
+my $cd = 1;
+my $track = 1;
+my $time = 0;
+
+my $retval = GetOptions ("prefix=s" => \$prefix,
+			 "rename!" => \$rename,
+			 "cdlen=f" => \$cdlen);
+
+sub shnlen {
+   my @FILES = @_;
+   my %LEN;
+
+   my $fnregex = "(" . join ("|", map { quotemeta } @FILES) . ")";
+
+   open (SHNLEN, "shnlen @FILES|") or die "open pipe to shnlen: $!\n";
+
+   while (<SHNLEN>) {
+      next unless /^\s*(\d+):(\d{2})\.(\d{2})\s+\d+\s+.*$fnregex/o;
+      my ($min, $sec, $frames, $file) = ($1, $2, $3, $4);
+      $LEN{$file} = $min + $sec / 60 + $frames / (60 * 75);
+   }
+
+   return %LEN;
+}
+
+sub msfstring {
+   my $time = shift;
+   my $min = int $time;
+   my $sec = int (60 * ($time - int $min));
+   my $frames = ($time - $min - $sec / 60) * 75 * 60;
+
+   sprintf ("%d:%02d.%02d", $min, $sec, $frames);
+}
+
+my %LEN = shnlen (@ARGV);
+my %NAMES;
+my %CDS;
+
+foreach my $file (sort @ARGV) {
+   die unless exists $LEN{$file};
+   my $len = $LEN{$file};
+
+   die "Track $file is too long to fit on one $cdlen minute CD (" .
+     msfstring ($len) . ")\n" if $len > $cdlen;
+
+   if (not defined $prefix) {
+      $prefix = $file;
+      $prefix =~ s/^([^\d]+).*/$1/;
+      print "Using filename prefix '$prefix'\n";
+   }
+
+   if ($time + $len > $cdlen) {
+      $time = 0;
+      $track = 1;
+      $cd++;
+   }
+
+   $time += $len;
+
+   my $ext = $file; $ext =~ s/^.*\.(wav|shn)$/$1/i;
+
+   $NAMES{$file} = sprintf ("${prefix}d${cd}t%02d.$ext", $track++);
+
+   push (@{ $CDS{$cd}{tracks} }, $rename ? $NAMES{$file} : $file);
+   $CDS{$cd}{len} = $time;
+
+   print "$file -> $NAMES{$file} [" . msfstring ($len) . "]\n";
+
+   rename ($file, $NAMES{$file}) if $rename and $file ne $NAMES{$file};
+}
+
+foreach my $cd (sort { $a <=> $b } keys %CDS) {
+   print "CD $cd: " . scalar (@{ $CDS{$cd}{tracks}}) .
+     " tracks, total time " . msfstring ($CDS{$cd}{len}) . "\n";
+}

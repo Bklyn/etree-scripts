@@ -1,0 +1,911 @@
+#!/usr/bin/perl -w
+#
+# shn2mp3 - Convert a directory of SHN files (hopefully stored in a
+# semi-etree.org-compliant structure) into a directory of MP3 files
+# with informative tags.  Uses logic from the "makehbx" script to
+# parse any info file stored with the SHN files to get information
+# like the band name, venue, track names and recording source.
+#
+# $Id$
+
+use strict;
+use Getopt::Long;
+use File::Basename;
+use File::Find;
+use Date::Parse;
+use Data::Dumper;
+use POSIX qw(strftime);
+use HTML::Entities;		# Some folks might not have this; get it
+use File::Copy;
+use IO::Handle;
+
+$File::Find::dont_use_nlink = 1; # Incase this is smbfs or whatever
+
+my %BANDS;
+my $progname = basename $0;
+my $version = '$Revision$ ';
+$version =~ s/^.Revision:\s+//; $version =~ s/\s*\$\s*$//;
+my $debug = 0;
+my $writefiles = 0;
+my $force = 0;
+my $lame = "lame";
+my $lameopts;
+my $bitrate = 192;
+my $quality = 2;
+my $target = ".";
+my $test = 0;
+my $help = 0;
+my %OUTPUT;
+
+format STDOUT_TOP =
++-----------------------------------------------------------------------------+
+|   Directory: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
+$OUTPUT{"Directory"}
+|   Info File: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
+$OUTPUT{"InfoFile"}
+| Destination: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
+$OUTPUT{"Destination"}
+|        Band: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
+$OUTPUT{"Band"} || "Unknown"
+|        Date: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
+$OUTPUT{"Date"} || "Unknown"
+|       Venue: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
+$OUTPUT{"Venue"} || "Unknown"
+|      Source: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
+$OUTPUT{"Source"} || "Unknown"
++-----------------------------------------------------------------------------+
+Disc# Track Time  Title / Comments
+----- ----- ----- ----------------
+.
+
+format STDOUT =
+@>>>> @>>>> @>>>> @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+@OUTPUT{"Disc", "Track", "Time", "Title"}
+.
+
+sub version {
+   my $lameversion = `lame --version | head -1`;
+   chomp $lameversion;
+
+   print <<EOF
+$progname version $version using $lameversion
+
+Copyright 2002, Caleb Epstein
+
+Copying and modification permitted only under the terms of the Perl
+Artistic License, the text of which is available at <URL:
+http://www.perl.com/language/misc/Artistic.html>
+
+EOF
+  ;
+}
+
+my %WORD2NUM = ("one" => 1, "two" => 2, "three" => 3, "four" => 4, "five" => 5,
+		"six" => 6, "seven" => 7, "eight" => 8, "nine" => 9,
+		"ten" => 10,
+		# Roman numerals
+		"i" => 1, "ii" => 2, "iii" => 3, "iv" => 4, "v" => 5,
+		"vi" => 6, "vii" => 7, "viii" => 8, "ix" => 9, "x" => 10 );
+
+my $numberwords = join ("|", keys %WORD2NUM);
+
+# Some regexps we use to recognize certain parts of the text file,
+# mostly taping related
+my $spots = 'fob|dfc|btp|aud|sbd|on(\s*|-)stage|matrix|mix|balcony|rail|stand';
+my $mics = 'caps|cardioid|sc?ho?ep[sz]|neumann|mbho|akg';
+my $cables = 'kc5|actives?|patch(?:ed)?';
+my $pres = 'lunatec|apogee|ad1000|ad2k\+?|oade|sonosax|sbm-?1|' .
+  'usb-pre|mini[\s-]?me';
+my $dats = 'dat|pcm|d[378]|da20|d10|m1|sv-25[05]|da-?p1|tascam|sony|' .
+  'teac|aiwa|panasonic|hhb|portadat|44\.1(?:k(?:hz))|mini-?disc|fostex';
+my $laptops = 'laptop|dell|ibm|apple|toshiba|(power|i)-?book';
+my $digicards = 'ieee1394|s.?pdif|zefiro|za-?2|rme|digiface|sb-?live|fiji|' .
+  'turtle\sbeach|delta\sdio|event\sgina|montego|zoltrix';
+my $software = 'cd-?wave?|mkwact|shn(?:v3)?|shorten|samplitude|' .
+  'cool[-\s]?edit|sound.?forge|wavelab';
+my $venues = '(?:arts cent|theat)(?:er|re)|playhouse|arena|club|university|'.
+  'festival|lounge|room|cafe|field|house|airport|ballroom|college';
+my $states = 'A[LKZR]|CA|CO|CT|DE|FL|GA|HI|I[DLNA]|KS|KY|LA|M[AEDINSOT]|' .
+  'N[EVHJMYCD]|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|W[AVIY]|DC';
+
+# Types of audio files we recognize, by extension
+my @AUDIOEXT = ("shn", "mp3", "ogg", "flac");
+
+# A regex that matches most dates
+my $datefmt = '\d{1,2}[-\.\/]\d{1,2}[-\.\/]\d{2,4}|' .
+  '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2},?\s+\d{2,4}';
+
+# extension - get the extension part of a filename
+sub extension {
+   my $filename = shift;
+   my $ext = $_;
+   return if $ext =~ /(^(bak|orig)$|~$)/;
+   $ext =~ s/^.+\.([^\.]+)$/$1/;
+   $ext;
+}
+
+# findfiles - find all of the files in a directory
+sub findfiles {
+   my $arg = shift;
+   my $dir = $arg->{"Directory"};
+
+   return unless defined $dir;
+
+   # Find all of the files in this directory and group them by their
+   # filename extension as well as their full path
+   find (sub { return unless -f $_;
+	       my $ext = extension ($_);
+	       return unless defined $ext;
+	       $arg->{"Files"}{$File::Find::name} = { "ext" => lc $ext,
+						      "size" => -s $_};
+	       $arg->{"ByExt"}{lc $ext}{$File::Find::name} = 1;
+	    }, $dir);
+}
+
+# matchchars - count the number of matching characters between two strings
+sub matchchars {
+   my $tomatch = shift;
+   my $string = shift;
+   my $numcheck = length $tomatch;
+   $numcheck = length $string if length $string < $numcheck;
+   my $hits = 0;
+
+   foreach my $i (0 .. $numcheck - 1) {
+      if (lc (substr ($tomatch, $i, 1)) eq lc (substr ($string, $i, 1))) {
+	 ++$hits;
+      } else {
+	 last;
+      }
+   }
+
+   $hits;
+}
+
+# readtext - choose the text file which describes the SHNs and read it
+sub readtext {
+   my $arg = shift;
+   my $dir = $arg->{"Directory"};
+   my $infofile = $arg->{"InfoFile"};
+
+   if (not defined $infofile) {
+      # Try and find any .txt or .nfo file in the current directory.
+      my (@TXT, @NFO, @ALL);
+      if (exists $arg->{"ByExt"}{"txt"}) {
+	 push (@TXT, keys %{ $arg->{"ByExt"}{"txt"}});
+	 push (@ALL, @TXT);
+      }
+
+      if (exists $arg->{"ByExt"}{"nfo"}) {
+	 push (@NFO, keys %{ $arg->{"ByExt"}{"nfo"}});
+	 push (@ALL, @NFO);
+      }
+
+      if (not scalar @ALL) {
+	 warn "$dir: No txt or nfo files found.  Make one.\n";
+	 return;
+      }
+
+      $infofile = $ALL[0];
+
+      if (scalar @ALL > 1) {
+	 # See if we can determine which is the "real" info file; prefer
+	 # the .txt extension.
+	 if (scalar @TXT == 1) {
+	    $infofile = $TXT[0];
+	 } elsif (scalar @NFO == 1) {
+	    $infofile = $NFO[0];
+	 } else {
+	    # Try and find best matching filename
+	    my $base = basename ($dir);
+	    my @BEST;
+	    my $score = 0;
+
+	    foreach my $txtfile (@ALL) {
+	       my $s = matchchars ($base, basename $txtfile);
+	       if ($s > $score) {
+		  $score = $s;
+		  @BEST = ( $txtfile );
+	       } elsif ($s == $score) {
+		  push (@BEST, $txtfile);
+	       }
+	    }
+	    $infofile = $BEST[0];
+	    if (scalar @BEST > 1) {
+	       warn "$dir: Too many candiates for the info file (@BEST); " .
+		 "using $infofile\n";
+	    }
+	 }
+      }
+
+      $arg->{"InfoFile"} = $infofile;
+   }
+
+   if (not open (INFOFILE, $infofile)) {
+      warn "$dir: Unable to open $infofile: $!\n";
+      return;
+   }
+
+   while (<INFOFILE>) {
+      chomp;
+      s/\r//g;
+      my $line = $_;
+
+      # add it to the array
+      push (@{$arg->{"InfoFileLines"}}, $line);
+   }
+
+   close (INFOFILE);
+}
+
+# shnlen - get the length of a SHN file in mm:ss.ff
+sub shnlen {
+   my $file = shift;
+   my $length;
+
+   open (SHNINFO, "shntool info \Q$file\E 2>/dev/null |") or return;
+
+   while (<SHNINFO>) {
+      if (/^length:\s+([\d\.:]+)/) {
+	 $length = $1;
+	 last;
+      }
+   }
+   close SHNINFO;
+   $length;
+}
+
+# parsetime - convert mm:ss.ff into seconds
+sub parsetime {
+   my $time = shift;
+   my $seconds = 0;
+
+   if (defined $time and $time =~ /^(\d+)[:\.](\d{2})[:\.]?(\d{2})?$/) {
+      $seconds = 60.0 * $1 + $2 + ($3 || 0) / 75.0;
+   }
+
+   $seconds;
+}
+
+# fmttime - convert seconds into m:ss.ff
+sub fmttime {
+   my $seconds = shift;
+   my $time;
+
+   if (defined $seconds) {
+      my $min = int ($seconds / 60);
+      my $sec = int ($seconds - 60 * $min);
+      my $frames = 75 * ($seconds - $sec - 60 * $min);
+      if ($frames) {
+	 $time = sprintf ("%d:%02d.%02d", $min, $sec, $frames);
+      } else {
+	 $time = sprintf ("%d:%02d", $min, $sec);
+      }
+   }
+
+   $time;
+}
+
+sub bytes_to_human {
+   my %UNITS = (1 => "B",
+                1024 => "kB",
+                1024 ** 2 => "MB",
+                1024 ** 3 => "GB",
+                1024 ** 4 => "TB",
+                1024 ** 5 => "PB");
+
+   my $nbytes = shift;
+   my $nunits;
+   my $units;
+
+   foreach my $divisor (sort { $a <=> $b } keys %UNITS) {
+      last if $nbytes < $divisor;
+      $units = $UNITS{$divisor};
+      $nunits = $nbytes / $divisor;
+   }
+
+   $nbytes = $nunits ? sprintf ("%.1f %s", $nunits, $units) : $nbytes;
+
+   $nbytes;
+}
+
+# indexshns - build a hash of all the SHN files we find by disc and track
+sub indexshns {
+   my $arg = shift;
+
+   # various regular expressions are tested against the shn names in an
+   # effort to determine the proper index value then the hash
+   # %SHNS is populated
+   my @AUDIO;
+
+   foreach my $ext (@AUDIOEXT) {
+      push (@AUDIO, keys %{$arg->{"ByExt"}{$ext}})
+	if exists $arg->{"ByExt"}{$ext};
+   }
+
+   my $audioext = join ("|", @AUDIOEXT);
+
+   foreach my $filename (sort @AUDIO) {
+      my $file = basename $filename;
+
+      my ($disc, $track);
+
+      # $file =~ /(?:[-\s\._]*d?(\d{1,2}))?[-\s\._]*t?(\d{1,3})
+      # .*(\.wav)?\.(mp3|shn)$/ix) {
+      if ($file =~ /(?:d(\d+))?[-_\s]?(?:t|track)?(\d{2})(-fixed)?
+	  (\.wav)?\.($audioext)$/ix
+	  or $file =~ /(?:d(\d+))?[-_\s]?(?:t|track)?(\d+)(-fixed)?
+	  (\.wav)?\.($audioext)$/ix) {
+	 ($disc, $track) = (int ($1 || 1), int $2);
+	 if ($track > 100) {
+            my $idxdisc = int ($track / 100);
+	    if (defined $disc and $idxdisc != $disc) {
+	       warn "$progname: $file: can't make sense of " .
+		 "track number '$track'; this seems to be disc $disc, " .
+		   "but the track number indicates it may be disc $idxdisc\n";
+	       next;
+ 	    } else {
+ 	       $track %= 100;
+ 	    }
+         }
+	 $disc ||= 1;
+      }
+
+      if (not defined $disc and not defined $track) {
+         warn "Can't parse filename: $file\n";
+      } else {
+	 my $index = 100 * $disc + $track;
+         $arg->{"ShnIndex"}{$index}{"Filename"} = $filename;
+	 my $duration = 0;
+	 $duration = shnlen ($filename) if $filename =~ /\.shn$/;
+	 my $seconds = parsetime ($duration);
+	 $arg->{"Songs"}{$index}{"Time"} = $duration
+	   if $filename =~ /\.shn$/i;
+	 $arg->{"Disc"}{$disc}{"Seconds"} += $seconds;
+	 $arg->{"Disc"}{$disc}{"Tracks"} = $track
+	   if not exists $arg->{"Disc"}{$disc}{"Tracks"}
+	     or $track > $arg->{"Disc"}{$disc}{"Tracks"};
+	 if (not exists $arg->{"Discs"} or $disc > $arg->{"Discs"}) {
+	    $arg->{"Discs"} = $disc;
+	 }
+      }
+   }
+}
+
+# parsetitle - take the song title from a text file and strip off any
+# segue indicator, notation characters (like @#$%^*) and running time
+sub parsetitle {
+   my $title = shift;
+
+   my ($segue, $notes, $running_time, $set);
+
+   # Strip off any running time from the end of the title
+   $title =~ s/\W?(\d+[:\.]\d{2}([:\.]\d{2})?)\W?/
+     $running_time = $1; ""; /e;
+
+   # Strip off any trailing segue marker
+   $title =~ s/\s*(-*\>)\s*$/ $segue = $1; "" /e;
+
+   # Strip off any "notes" indicators like @, #, $, %, ^, and *
+   $title =~ s/\s*([\*\@\#\$\%\^]+)\s*$/ $notes = $1; "" /e;
+
+   # Now strip off any other trailing non-word characters
+   $title =~ s/\W+$//;
+
+   # remove leading and trailing whitespace
+   $title =~ s/^\s+//; $title =~ s/\s+$//e;
+
+   # See if there is a set indicator (e.g. I: Song or E: Song)
+   if ($title =~ /^($numberwords):\s*(.+)/i) {
+      $set = word2num ($1);
+      $title = $2;
+   } elsif ($title =~ /^e(?:ncore)?:\s*(.+)/i) {
+      $set = "encore";
+      $title = $1;
+   }
+
+   ($title, $segue, $notes, $running_time, $set);
+}
+
+# word2num - convert a word into a number
+sub word2num {
+   my $word = shift;
+   return int ($word) if $word =~ /^\d+$/;
+   return $WORD2NUM{lc $word};
+}
+
+# parseinfo - parse the info file contents for disc numbers and track names
+sub parseinfo {
+   my $arg = shift;
+
+   my $discnum = 1;		# start with disc 1
+   my $numsongs = 0;
+   my $lastsong = 0;
+   my $lastindex = 0;
+   my $lastdisc = 1;
+   my $indisc = 0;
+   my $set;
+
+   foreach my $line (@{$arg->{"InfoFileLines"}}) {
+      # Strip whitespace
+      $line =~ s/^\s+//; $line =~ s/\s+$//;
+
+      next unless length $line;
+
+      # looking for disc delimeters
+      if (not $numsongs and
+	  not exists $arg->{"Band"}
+	  and $line !~ /\b(silver wrapper|presents|spotlight)\b/ix) {
+	 $arg->{"Band"} = $line;
+      } elsif (not $numsongs
+	       and ($line =~ /($venues)/ix or $line =~ /\b($states)\b/)) {
+	 $arg->{"Venue"} .= " - " if exists $arg->{"Venue"};
+	 $arg->{"Venue"} .= $line;
+      } elsif ($line =~ /^(source|src):/i or
+	       $line !~ /^((trans|x)fer|conver(ted|sion)):?/i and
+	       $line =~ /\b($spots|$mics|$cables|$pres|$dats)\b/ix) {
+	 $line =~ s/^(source|src)\b:?\s*//i;
+	 if (length $line) {
+	    $arg->{"Source"} .= " " if exists $arg->{"Source"};
+	    $arg->{"Source"} .= $line;
+	 }
+      } elsif ($line =~ /^((?:trans|x)fer|conver(?:ted|sion))/i or
+	       $line =~ /\b($dats|$laptops|$digicards|$software)\b/ix) {
+	 $line =~ s/^((trans|x)fer|conver(ted|sion))\b:?\s*//i;
+	 if (length $line) {
+	    $arg->{"Transfer"} .= " " if exists $arg->{"Transfer"};
+	    $arg->{"Transfer"} .= $line;
+	 }
+      } elsif ($line =~ /^tape[rd]/i) {
+	 $line =~ s/^tape(r|d)(\sby)?:?\s*//i;
+	 $arg->{"Taper"} = $line;
+      } elsif ($line =~ /^seede[rd]/i) {
+	 $line =~ s/^seede(r|d)( by)?:?\s*//i;
+	 $arg->{"Seeder"} = $line;
+      } elsif (not $numsongs and not exists $arg->{"Date"} and
+	       $line =~ /($datefmt)/ix) {
+	 $arg->{"Date"} = $1;
+      } elsif ($line =~ /^\W*(c?d|dis[kc]|volume)\W*(\d+|$numberwords)\b/ix){
+	 $discnum = word2num ($2);
+	 $indisc = $discnum;
+      } elsif ($line =~ /\bset\s+(\d+|$numberwords)\b/ix) {
+	 $set = word2num ($1);
+      } elsif ($line =~ /^encore/i) {
+	 $set = "encore";
+      } elsif ($line =~ /^(\d+)\s*(cd|dis[ck])s?/ix) {
+	 $arg->{"Discs"} = $1;
+      } elsif ($line =~ /^(?:d\d+)?t?(\d+)\s*(?:\s*[-\.:\)\]]+)?(.+)/
+	       and int $1
+	       and not exists $arg->{"Songs"}{100 * $discnum + $1}{"Title"}
+	       and $line !~ m@^\d{1,2}[-/\.]\d{1,2}[-/\.](?:\d{2}|\d{4})@) {
+	 my $songnum = int $1;
+	 my ($title, $segue, $notes, $runtime, $maybeset) = parsetitle ($2);
+	 $set = $maybeset if defined $maybeset;
+
+	 my $index = 100 * $discnum + $songnum;
+
+	 $arg->{"Discs"} = $discnum;
+	 $arg->{"Disc"}{$discnum}{"Tracks"} = $songnum;
+	 $arg->{"Songs"}{$index}{"Disc"} = $discnum;
+	 $arg->{"Songs"}{$index}{"Track"} = $songnum;
+	 $arg->{"Songs"}{$index}{"Set"} = $set
+	   if defined $set;
+	 $arg->{"Songs"}{$index}{"Title"} = $title;
+	 $arg->{"Songs"}{$index}{"Line"} = $line;
+	 $arg->{"Songs"}{$index}{"Notes"} = $notes if defined $notes;
+	 $arg->{"Songs"}{$index}{"Segue"} = $segue if defined $segue;
+	 $arg->{"Songs"}{$index}{"Time"} = $runtime
+	   if defined $runtime;
+	 $arg->{"Notes"}{$notes} = ""
+	   if defined $notes and not exists $arg->{"Notes"}{$notes};
+
+       	 ++$numsongs;
+	 $lastsong = $songnum;
+	 $lastdisc = $discnum;
+	 $lastindex = $index;
+      } elsif ($line =~ /^([\*\@\#\$\%\^]+)\s*[-=:]?\s*(.+)/
+	       and exists $arg->{"Notes"}{$1}) {
+	 $arg->{"Notes"}{$1} .= $2;
+      } elsif ($line =~ /\w/) {
+	 push (@{$arg->{"Etc"}}, $line);
+      }
+   }
+
+   # Sometimes Band and Date get smushed together
+   if (not exists $arg->{"Date"}
+       and exists $arg->{"Band"}
+       and $arg->{"Band"} =~ /^(.+)\s+((?:$datefmt).*)/ix) {
+      #\d+[-\.\/]\d+[-\.\/]
+      # (\d{2}|\d{4}).+)/ix) {
+      my $band = $1;
+      $band =~ s/\s+\W$//;	# Strip off possible trailing delimiter
+      $arg->{"Band"} = $band;
+      $arg->{"Date"} = $2;
+   }
+
+   # Still no date?  Try and get it from the directory name
+   if (not exists $arg->{"Date"}) {
+      my $base = basename $arg->{"Directory"};
+      if (defined $base and $base =~ /^.+-?(\d{2,4})-(\d{1,2})-(\d{1,2})(-.+)?\./) {
+	 $arg->{"Date"} = "$2/$3/$1";
+      }
+   }
+
+   # Sometimes Date and Venue get smushed together
+   if (not exists $arg->{"Venue"}
+       and exists $arg->{"Date"}
+       and $arg->{"Date"} =~ /^($datefmt)\s*-?\s*(.+,\s*[A-Z][A-Z]\b.*)$/i) {
+      $arg->{"Date"} = $1;
+      $arg->{"Venue"} = $2;
+   }
+
+   # Sometimes Date and Venue get smushed together (part 2)
+   if (not exists $arg->{"Date"}
+       and exists $arg->{"Venue"}
+       and $arg->{"Venue"} =~ /^($datefmt)\s*-?\s*(.+,\s*[A-Z][A-Z]\b.*)$/i) {
+      $arg->{"Date"} = $1;
+      $arg->{"Venue"} = $2;
+   }
+
+   if (exists $arg->{"Date"}) {
+      my $time = str2time ($arg->{"Date"});
+      if (defined $time) {
+	 $arg->{"CanonicalDate"} = strftime ("%Y-%m-%d", localtime ($time));
+      }
+   }
+
+   altparseinfo ($arg) unless $numsongs;
+}
+
+# altparseinfo - alternate parsing routine
+sub altparseinfo {
+   my $arg = shift;
+
+   my $songnum = 0;
+   my $discnum = 1;		# start with disc 1
+   my $numsongs = 0;
+   my $indisc = 0;
+   my $set;
+
+   foreach my $line (@{ $arg->{"InfoFileLines"}}) {
+      $line =~ s/^\s+//;
+      $line =~ s/\s+$//;
+
+      # looking for disc delimeters
+      if ($line =~ /^\W*(?:cd|dis[kc]|volume)\W*(\d+|$numberwords)\b/i) {
+	 $discnum = word2num ($1);
+	 $indisc = 1;
+	 $songnum = 0;
+	 next;
+      } elsif ($line =~ /^\W*set\s*(\d+|$numberwords)\b/ix) {
+	 $set = word2num ($1);
+      } elsif ($line =~ /^\W*encore\b/i) {
+	 $set = "encore";
+      } elsif ($indisc) {
+	 # we are trying to interpret the case where the songs are not
+	 # numbered at all.  We will treat every non blank line as a
+	 # song name - except those lines whose contents are "set* and
+	 # encore* ...
+	 if ($line =~ /\w/) {
+	    $numsongs++;
+	    $songnum++;
+	    my ($title, $segue, $notes, $runtime, $maybeset) =
+	      parsetitle ($line);
+	    $set = $maybeset if defined $maybeset;
+
+	    my $index = $discnum * 100 + $songnum;
+
+	    # check that there is a matching index in the shn's
+	    if (exists $arg->{"ShnIndex"}{$index}) {
+	       $arg->{"Discs"} = $discnum;
+               $arg->{"Disc"}{$discnum}{"Tracks"} = $songnum;
+	       $arg->{"Songs"}{$index}{"Disc"} = $discnum;
+	       $arg->{"Songs"}{$index}{"Track"} = $songnum;
+	       $arg->{"Songs"}{$index}{"Set"} = $set if defined $set;
+               $arg->{"Songs"}{$index}{"Title"} = $title;
+               $arg->{"Songs"}{$index}{"Notes"} = $notes if defined $notes;
+               $arg->{"Songs"}{$index}{"Segue"} = $segue if defined $segue;
+               $arg->{"Songs"}{$index}{"Time"} = $runtime
+                  if defined $runtime;
+
+	       # Remove this from the "Etc" list if it is in ther
+	       if (exists $arg->{"Etc"}) {
+		  @{$arg->{"Etc"}} = grep { $_ ne $line } @{$arg->{"Etc"}};
+	       }
+	    }
+	 }
+      }
+   }
+}
+
+# uniq - combine 2 lists into a single list of unique values
+sub uniq {
+   my @A = @_;
+   my %A = map { $_ => 1 } @A;
+   keys %A;
+}
+
+# readmd5s - parse any md5 files and associate the sums with the
+# appropriate files
+sub readmd5s {
+   my $arg = shift;
+
+   my @MD5FILES;
+   push (@MD5FILES, keys %{$arg->{"ByExt"}{"md5"}})
+     if exists $arg->{"ByExt"}{"md5"};
+
+   foreach my $md5file (@MD5FILES) {
+      my $dir = dirname $md5file;
+
+      open (MD5FILE, $md5file) or next;
+      local $/ = undef;
+      my $contents = <MD5FILE>;
+      close MD5FILE;
+
+      $contents =~ s/\r/\n/g;
+      my @LINES = split /\n/, $contents;
+
+      foreach (@LINES) {
+	 next unless /^([\da-f]{32})\s+\*?(.+)$/;
+	 my ($sum, $filename) = ($1, $2);
+	 if ($filename !~ m@/@) {
+	    $filename = "$dir/$filename";
+	 }
+	 $arg->{"Files"}{$filename}{"md5"} = $sum;
+      }
+   }
+}
+
+# reportmismatches - generate a report of any shn files w/o song names
+# and vice versa
+sub reportmismatches {
+   my $arg = shift;
+
+   # look through the allkey list ( hash ) 
+   foreach my $key (sort { $a <=> $b } uniq (keys %{$arg->{"Songs"}},
+		                             keys %{$arg->{"ShnIndex"}})) {
+      if (not exists $arg->{"Songs"}{$key}) {
+	 warn "" . ($arg->{"Directory"} ? $arg->{"Directory"} . ": " : "") .
+	   "No song title for file $arg->{ShnIndex}{$key}{Filename}.\n";
+      }
+      if (not exists $arg->{"ShnIndex"}{$key}) {
+	 warn "" . ($arg->{"Directory"} ? $arg->{"Directory"} . ": " : "" ) .
+	   "No SHN file for song $key: $arg->{Songs}{$key}{Title}\n";
+      }
+   }
+}
+
+sub usage {
+   $0 = basename $0;
+
+   print <<EOF;
+$0 - Convert SHN files into MP3 file
+
+Usage: $0 [options] path-to-shns
+
+Options:
+  --lame l              Specify an alternate encoder.  Should support the
+                        same command line sytax as LAME (e.g. toolame).
+  --lameopts "a b c"    Pass through for additional arguments to LAME.
+  -b | --bitrate b      Specify bit-rate of MP3s.  Default is $bitrate.
+  -q | --quality q      Set LAME encoding "quality".  Best is 0, worst is 9.
+  -h | --high-quality   Equivalent to --quality 2.
+  -f | --fast           Equivalent to --quality 7.
+  --target t            Root directory where MP3s will be written.  Default is
+                        the current working directory.
+  --force               Force overwriting of existing MP3s.
+  --test                Just print what would be done; do not encode anything.
+  --help                Generate this usage message and exit.
+EOF
+   ;
+}
+
+my $retval = GetOptions ("lame=s" => \$lame,
+			 "lameopts=s" => \$lameopts,
+			 "b|bitrate=i" => \$bitrate,
+			 "target=s" => \$target,
+			 "test!" => \$test,
+			 "q|quality=i" => \$quality,
+			 "f|fast" => sub { $quality = 7; },
+			 "h|high-quality" => sub { $quality = 2; },
+			 "force!" => \$force,
+			 "debug!" => \$debug,
+			 "help!" => sub { usage; exit (0); },
+			 "version!" => sub { version; exit (0); });
+
+if ($retval == 0 or $help) {
+   usage;
+   exit (not $help);
+}
+
+sub read_dir {
+   my $dir = shift;
+   my (@FILES, @DIRS);
+
+   opendir (D, $dir) or return;
+
+   while (defined (my $d = readdir (D))) {
+      next if $d =~ /^\.\.?$/;
+      my $path = "$dir/$d";
+      push (@FILES, $path) if -f $path and $d =~ /\.(shn|txt)$/i;
+      push (@DIRS, $path) if -d $path;
+   }
+
+   closedir D;
+
+   return \(@DIRS, @FILES);
+}
+
+sub mkdir_p {
+   my $dir = shift;
+   my @D = split /\//, $dir;
+
+   foreach my $i (0 .. $#D) {
+      my $path = join ("/", @D[0..$i]);
+      next unless length $path;
+      if (not -d $path) {
+	 mkdir ($path, 0777) or warn "mkdir $path: $!";
+      }
+   }
+}
+
+sub mp3dir {
+   my $dir = shift;
+   my $mp3dir = "$target/" . basename ($dir);
+   $mp3dir =~ s/(\.shnf?)?$/.mp3f/i;
+   $mp3dir;
+}
+
+sub shn_to_mp3 {
+   my $info = shift;
+   my $index = shift;
+   my $file = $info->{"ShnIndex"}{$index}{"Filename"};
+
+   my $shndir = $info->{"Directory"};
+   my $mp3dir = mp3dir ($shndir);
+
+   mkdir_p $mp3dir unless $test or -d $mp3dir;
+
+   my $mp3file = "$mp3dir/" . basename $file;
+   $mp3file =~ s/(\.wav)?\.shn$/.mp3/i;
+
+   my $artist = $info->{"Band"} || "Unknown";
+   my $album = $info->{"CanonicalDate"};
+   my ($disc, $track) = (int ($index / 100), $index % 100);
+   my $title = $info->{"Songs"}{$index}{"Title"} || "";
+   $title = sprintf ("Track %02d", $track) unless length $title;
+
+   if (defined $info->{"Discs"} and $info->{"Discs"} > 1) {
+      $album .= " [$disc/$info->{Discs}]";
+   }
+   if ($info->{"Venue"}) {
+      $album .= " $info->{Venue}";
+   }
+   my $year = substr ($info->{"CanonicalDate"}, 0, 4);
+   my $comment = $info->{"Source"} || "Encoded by $progname";
+   my $tracktime = $info->{"Songs"}{$index}{"Time"} || "0:00";
+   my $tracksecs = parsetime ($tracktime);
+
+   my $cmd = "shorten -x " . quotemeta ($file) . " - | " .
+     "$lame -b $bitrate -q $quality --add-id3v2" .
+       " --tt " . quotemeta ($title) .
+	 " --ta " . quotemeta ($artist) .
+	   " --tl " . quotemeta ($album) .
+	     " --tc " . quotemeta ($comment) .
+	       " --ty " . int ($year) .
+		 " --tn " . int ($track) .
+		   (defined $lameopts ? " $lameopts" : "") .
+		     " - " . quotemeta ($mp3file) .
+		       ($debug ? "" : " > /dev/null 2>&1");
+
+   my $skip = (-f $mp3file and -M $mp3file < -M $file and not $force);
+
+   @OUTPUT{"Destination", "Disc", "Track", "Time", "Title"} =
+     ($mp3dir, $disc, $track, $tracktime, $title);
+   $OUTPUT{"Disc"} = "$disc/$info->{Discs}"
+     if defined $info->{"Discs"} and $info->{"Discs"} > 1;
+   $OUTPUT{"Track"} = "$track/$info->{Disc}{$disc}{Tracks}"
+     if exists $info->{Disc} and exists $info->{Disc}{$disc};
+   $OUTPUT{"Time"} =~ s/\.\d+$//;
+   write;
+
+   print "Command line: $cmd\n" if $debug;
+
+   my $status = 0;
+   my $start = time;
+
+   if (not $test and not $skip) {
+      $status = system ($cmd);
+   }
+
+   if ($status != 0) {
+      unlink $mp3file;		# Don't keep around a potentially short file
+
+      my $signal = $status & 127;
+      my $core = $status & 128;
+      $status >>= 8;
+      warn "Error encoding $file, exit status $status" .
+	($signal ? " on signal $signal" : "") .
+	  ($core ? " (dumped core)" : "") . "\n";
+
+      if ($signal) {
+	 print "Exiting.\n";
+	 exit $signal;
+      }
+   } elsif (not $test) {
+      my $finish = time;
+      my $encodetime = $finish - $start;
+
+      @OUTPUT{"Disc", "Track", "Time"} =
+	("", "", $encodetime ? fmttime ($encodetime) : "");
+      if ($tracksecs and $encodetime) {
+	 $OUTPUT{"Title"} = "Encode speed " .
+	   sprintf ("%.1fx", $tracksecs / $encodetime);
+      } else {
+	 $OUTPUT{"Title"} = "MP3 size " . bytes_to_human (-s $mp3file);
+	 if ($skip) {
+	    $OUTPUT{"Title"} .= ", created " .
+	      strftime ("%m/%d/%y %H:%M", localtime ((stat $mp3file)[10]));
+	 }
+      }
+      write;
+   }
+}
+
+push (@ARGV, ".") unless scalar @ARGV;
+
+foreach my $dir (@ARGV) {
+   my %INFO;
+   if (-d $dir) {
+      $INFO{"Directory"} = $dir;
+   } elsif (-f $dir) {
+      $INFO{"InfoFile"} = $dir;
+   } else {
+      warn "Don't know how to handle argument '$dir'\n";
+      next;
+   }
+
+   # Find all the files in $dir
+   findfiles (\%INFO);
+
+   # Read the info file
+   readtext (\%INFO);
+
+   # Gather information about the SHN files
+   indexshns (\%INFO);
+
+   # Parse the info file.
+   parseinfo (\%INFO);
+
+   # Read any md5 files and associate the sums with the other files
+   readmd5s (\%INFO);
+
+   print "$dir: ", Dumper (\%INFO), "\n" if $debug;
+
+   # Report on audio files with no track titles and vice versa
+   reportmismatches (\%INFO) if $debug;
+
+   if (not exists $INFO{"ShnIndex"} or not scalar keys %{$INFO{"ShnIndex"}}) {
+      warn "$dir: no SHN files to convert.\n";
+      next;
+   }
+
+   %OUTPUT = %INFO;
+
+   $^L = "\n";
+   STDOUT->format_lines_left (0);
+
+   # Copy the info file
+   if (not $test and exists $INFO{"InfoFile"}) {
+      my $source = $INFO{"InfoFile"};
+      my $dest = mp3dir ($dir) . "/" . basename ($source);
+      mkdir_p (mp3dir ($dir));
+      if (not -f $dest or -M $source < -M $dest or $force) {
+	 copy ($source, $dest);
+      }
+   }
+
+   # Make the MP3s
+   foreach my $index (sort { $a <=> $b } keys %{$INFO{"ShnIndex"}}) {
+      shn_to_mp3 \%INFO, $index;
+   }
+}

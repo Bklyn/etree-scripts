@@ -1,0 +1,24 @@
+#!/bin/sh
+#
+# burn-shns
+#
+# Take a directory of SHN files and uncompress them and burn them on a
+# CD
+#
+# $Id$
+
+set -e
+
+# BURN_DIR environment variable sets where .wav files are extracted.
+# Default is /var/tmp/burn unless you have it set.
+BURN_DIR=${BURN_DIR:-/var/tmp/burn}
+
+test -d $BURN_DIR || mkdir -p $BURN_DIR
+
+cd $BURN_DIR
+
+# Remove any stray .wav, .bin and toc files
+rm -f *.wav toc data.bin
+echo Burning SHN files in "$@"
+unshn "$@"
+time cdrecord -v -pad -dao -eject *.wav

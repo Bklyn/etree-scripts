@@ -1,0 +1,252 @@
+#!/usr/bin/perl -w
+#
+# unshn - convert Shorten, FLAC, OGG, or MP3 files to WAVs for burning to CD.
+#
+# Pass the script a directory name, file name, or list of both, and it
+# will un-compress all the files in that set.  The extracted files are
+# placed in the current directory.
+#
+# This Perl re-write of the original shell script version is suffering
+# from a bit of feature-creep.
+#
+# Author: Caleb Epstein <cae at bklyn dot org>
+#
+# $Id$
+
+use strict;
+use File::Basename;
+use File::Find;
+use Getopt::Long;
+
+$File::Find::dont_use_nlink = 1;
+
+my $progname = basename $0;
+my $shnlen = 1;
+my $shnfix = 0;
+my $rmfixed = 1;
+(my $version = '$Revision$') =~ s/(^\$Revision$$)//g;
+
+sub usage {
+   print <<EOF;
+$progname - extract compressed audio files to WAVE format for burning to CD
+
+Usage: $progname [options] dir|file [dir|file ...]
+
+Options:
+  -h | --help     Display this usage message and exit.
+  -v | --version  Display the application version number and exit.
+  -f | --fix      Run "shntool fix" on the WAVE files which are extracted to
+                  ensure proper CD sector boundary alignment and click-free
+                  burns.
+  -l | --len      Run "shntool len" on the WAVE files after extracting.  This
+                  is the default.  Use --nolen to disable.
+  -k | --keep     When running in --fix mode, do not remove any files which
+                  have fixed versions.
+EOF
+}
+
+my $retval = GetOptions ("h|help!" => sub { usage; exit (0); },
+			 "v|version!" =>
+			 sub { print "$progname version $version\n";
+			       exit (0); },
+			 "fix!" => \$shnfix,
+			 "len!" => \$shnlen,
+			 "keep!" => sub { $rmfixed = 0; });
+
+if ($retval != 1) { usage(); exit (1); }
+
+eval "use Audio::Wav";
+my $have_audio_wav = not $@;
+
+# The file types we support, by extension
+my %DECODERS = ( "shn" => 'shorten -x @@FILE@@ @@WAVFILE@@',
+		 "flac" => 'flac -d -o @@WAVFILE@@ @@FILE@@',
+		 "mp3" => 'mpg123 -q -w @@WAVFILE@@ @@FILE@@',
+		 "ogg" => 'oggdec -o @@WAVFILE@@ @@FILE@@');
+
+# seconds_to_mmssff - convert a number of seconds to a string of the
+# format MM:SS.FF
+sub seconds_to_mmssff {
+   my $seconds = shift;
+   my $frames = 75 * ($seconds - int ($seconds));
+   $seconds -= $frames / 75;
+   my $minutes = int ($seconds / 60);
+   $seconds -= 60 * $minutes;
+   sprintf ("%2d:%02d.%02d", $minutes, $seconds, $frames);
+}
+
+# waveinfo - get information about a WAVE file
+sub waveinfo {
+   return unless $have_audio_wav;
+   my $file = shift;
+   my $wav = new Audio::Wav;
+   my $read = $wav->read ($file);
+   my $details = $read->details();
+   return unless $details;
+   my $frames = 75 * $details->{"data_length"} / $details->{"bytes_sec"};
+   $details->{"sbe"} = ($frames != int $frames);
+   $details->{"mmssff"} = seconds_to_mmssff ($details->{"length"});
+   $details;
+}
+
+# Get the list of files we want to extract
+my %FILES;
+my %WAVFILES;
+
+push (@ARGV, ".") unless scalar @ARGV;
+
+foreach my $arg (@ARGV) {
+   sub wanted {
+      my $file = $File::Find::name;
+      foreach my $ext (keys %DECODERS) {
+	 if ($file =~ m/\.$ext$/i) {
+	    $FILES{$file} = $ext;
+	    last;
+	 }
+      }
+   }
+
+   find (\&wanted, $arg);
+}
+
+if (not scalar keys %FILES) {
+   die "$progname: no supported audio files found in @ARGV\n";
+}
+
+# Unbuffer stdout
+$| = 1;
+
+my $numfiles = scalar keys %FILES;
+my $index = 0;
+my $status = 0;
+my @SBES;
+
+foreach my $file (sort keys %FILES) {
+   my $ext = $FILES{$file};
+   my $basename = basename $file;
+   $basename =~ s/\.$ext$//i;
+   my $wavfile = "$basename.wav";
+
+   my $command = $DECODERS{$ext};
+
+   $command =~ s/\@\@FILE\@\@/\Q$file\E/g;
+   $command =~ s/\@\@WAVFILE\@\@/\Q$wavfile\E/g;
+
+   print sprintf ("File %2d of %2d: ", ++$index, $numfiles) .
+     basename ($file) . ": ";
+
+   my $retval = system ($command);
+
+   if ($retval == 0 and -s $wavfile) {
+      print "OK";
+      $WAVFILES{$wavfile} = 1;
+      if ($have_audio_wav) {
+	 my $waveinfo = waveinfo ($wavfile);
+	 if (defined $waveinfo) {
+	    print " [$waveinfo->{mmssff}]";
+	    if ($waveinfo->{"sbe"}) {
+	       print " *SBE*";
+	       push (@SBES, $wavfile);
+	    }
+	 }
+      }
+      print "\n";
+   } elsif (not -s $wavfile) {
+      print "WAVE EMPTY (disk full?)\n";
+      unlink $wavfile;
+      $status |= 1;
+   } else {
+      unlink $wavfile;
+
+      my $exit = $retval >> 8;
+      my $signal = $retval & 127;
+      my $cored = $retval & 128;
+      unlink "core" if $cored;
+
+      print "ERROR: \U$ext\E decoder exited with status $exit" .
+	($signal ? " from signal $signal" : "") .
+	  ($cored ? " (dumped core)" : "") . "\n";
+
+      $status |= 1;
+   }
+}
+
+# If we encountered any SBEs, warn the user
+if (scalar @SBES) {
+   my $sbes = scalar @SBES;
+   warn "\nWARNING: encountered $sbes file(s) with CD Sector Boundary " .
+     "Errors (SBEs):\n\n";
+   warn "\t", join ("\n\t", sort @SBES), "\n";
+   $status |= 2;
+
+
+   if (not $shnfix) {
+      warn <<EOF;
+
+In some cases (on the last track of a disc or at the end of a set)
+tracks with SBEs are harmless, but in most cases they result in an
+audible "click" between tracks when you listen to the burned CD.
+
+You probably want to run "shntool fix" on the affected discs that
+contain these files.  You need to RUN "shntool fix" on *all* the
+files that make up a disc, not just the one containing the SBE.
+EOF
+      ;
+   }
+}
+
+# If running in --fix mode, run shntool fix on all the WAV files in the CWD
+if ($shnfix) {
+   find (sub { $WAVFILES{$_} = 1
+		 if m/\.wav$/i and not m/-fixed\.wav$/i }, ".");
+
+   warn "\nRunning \"shntool fix\" on *all* WAVE files:\n\n";
+
+   my @CMD = ("shntool", "fix", "-o", "wav", "-s", "b",
+	      sort keys %WAVFILES);
+
+   my $retval = system @CMD;
+
+   if ($retval == 0) {
+      print "\nINFO: shntool exited successfully.\n";
+
+      # Now find any files that were fixed and remove them
+      if ($rmfixed) {
+	 my @BEEN_FIXED;
+	 find (sub { $WAVFILES{$_} = 1 if m/-fixed\.wav$/i }, ".");
+
+	 foreach my $file (sort keys %WAVFILES) {
+	    next if $file =~ /-fixed\.wav$/i;
+	    (my $fixed = $file) =~ s/\.wav$/-fixed.wav/i;
+	    if (exists $WAVFILES{$fixed}) {
+	       push (@BEEN_FIXED, $file);
+	       delete $WAVFILES{$file};
+	    }
+	 }
+	 if (scalar @BEEN_FIXED) {
+	    print "Removing WAV files which have fixed versions:\n\t",
+	      join ("\n\t", @BEEN_FIXED), "\n";
+	    unlink @BEEN_FIXED;
+	 }
+      }
+   } else {
+      # shntool returned an error code
+      my $exit = $retval >> 8;
+      my $signal = $retval & 127;
+      my $cored = $retval & 128;
+      unlink "core" if $cored;
+
+      print "ERROR: shntool exited with status $exit" .
+	($signal ? " from signal $signal" : "") .
+	  ($cored ? " (dumped core)" : "") . "\n";
+
+      $status |= $exit;
+   }
+}
+
+if ($shnlen and scalar keys %WAVFILES) {
+   my @CMD = ("shntool", "len", sort keys %WAVFILES);
+   system (@CMD);
+}
+
+exit $status;

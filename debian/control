@@ -1,0 +1,20 @@
+Source: etree-scripts
+Section: sound
+Priority: optional
+Maintainer: Caleb Epstein <cae@home.com>
+Standards-Version: 3.1.1
+
+Package: etree-scripts
+Architecture: all
+Depends: ${shlibs:Depends} libdigest-md5-perl
+Suggests: shorten, shntool, cdrecord
+Description: Utility scripts for etree.org users.
+ Contains some handy utility scripts for etree.org users.  They are:
+ md5check - recursively check md5sums on a directory tree
+ unshn - Un-shorten a group of SHN files or directories
+ burn-shns - Wrapper for unshn and cdrecord.  Used to un-SHN files and burn.
+ shn - Take a group of WAV files and make SHN files from them.
+ cdfill - Calculate optimal CD-filling for a set of SHN files and optionally
+          rename them with disc and track indicators.
+ makehbx - Create a XML file with information about a directory of SHN files.
+ shn2mp3 - Convert a directory of SHN files to a nicely-tagged set of MP3s.
