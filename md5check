@@ -4,6 +4,8 @@
 #
 # Requires the Digest::MD5 module.
 #
+# Author: Caleb Epstein <cae at bklyn dot org>
+#
 # $Id$
 
 use strict;
