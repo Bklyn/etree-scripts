@@ -362,7 +362,8 @@ sub parseinfo {
 	  and $line !~ /\b(silver wrapper|presents|spotlight)\b/ix) {
 	 $arg->{"Band"} = $line;
       } elsif (not $numsongs
-	       and ($line =~ /($venues)/ix or $line =~ /\b($states)\b/)) {
+	       and ($line =~ /($venues)/ix or $line =~ /\b($states)\b/)
+	       and not $indisc) {
 	 $arg->{"Venue"} .= " - " if exists $arg->{"Venue"};
 	 $arg->{"Venue"} .= $line;
       } elsif ($line =~ /^(source|src):/i or
@@ -430,7 +431,7 @@ sub parseinfo {
 
        	 ++$numsongs;
 	 $lastsong = $songnum;
-	 $lastdisc = $discnum;
+	 $lastdisc = $indisc = $discnum;
 	 $lastindex = $index;
       } elsif ($line =~ /^([\*\@\#\$\%\^]+)\s*[-=:]?\s*(.+)/
 	       and exists $arg->{"Notes"}{$1}) {
