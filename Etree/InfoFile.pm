@@ -92,9 +92,8 @@ sub findfiles {
    find (sub { return unless -f $_;
 	       my $ext = extension ($_);
 	       return unless defined $ext;
-	       $self->{"Files"}{$File::Find::name} = { "ext" => lc $ext,
-						       "size" => -s $_};
-	       $self->{"ByExt"}{lc $ext}{$File::Find::name} = 1;
+	       $self->{"Files"}{$_} = { "ext" => lc $ext, "size" => -s $_ };
+	       $self->{"ByExt"}{lc $ext}{$_} = 1;
 	    }, $dir);
 }
 
@@ -187,7 +186,7 @@ sub readtext {
       return;
    }
 
-   if (not open (INFOFILE, $infofile)) {
+   if (not open (INFOFILE, $self->{"Directory"} . "/$infofile")) {
       warn ref ($self) . "::readtext: Unable to open $infofile: $!\n";
       return;
    }
