@@ -15,8 +15,8 @@ use Locale::Country;
 eval "use Date::Parse";
 my $have_date_parse = not $@;
 
-my $version = '$Revision$';
-$version =~ s/^.Revision:\s+//; $version =~ s/\s*\$\s*$//;
+my
+  $VERSION = sprintf "%d.%03d", q$Revision$ =~ /(\d+)/g;
 my $debug = 0;
 my $test = 0;
 
@@ -47,7 +47,8 @@ my $digicards = qr/ieee1394|s.?pdif|zefiro|za-?2|rme|digiface|sb-?live|fiji|
 my $software = qr/cd-?wave?|mkwact|shn(?:v3)?|shorten|samplitude|
   cool[-\s]?edit|sound.?forge|wavelab/ix;
 my $venues = qr/(?:arts cent|theat)(?:er|re)|playhouse|arena|club|university|
-  festival|lounge|room|cafe|field|house|airport|ballroom|college|hall/ix;
+  festival|lounge|room|cafe|field|house|airport|ballroom|college|hall|
+  auditorium/ix;
 my $states = qr/A[BLKZR]|BC|CA|CO|CT|DE|FL|GA|HI|I[DLNA]|KS|KY|LA|M[ABEDINSOT]|
   N[BCDEFVHJMSY]|O[HKNR]|P[AQ]|PEI|QC|RI|S[CDK]|TN|TX|UT|VT|VA|W[AVIY]|DC/x;
 my $countries = join ("|", map { qq/$_/ } all_country_names);
@@ -56,8 +57,8 @@ $countries = qr($countries);
 # A regex that matches most dates
 my $datefmt = qr/\d{4}[-\.\/]\d{1,2}[-\.\/]\d{1,2}|
 		 \d{1,2}[-\.\/]\d{1,2}[-\.\/]\d{2,4}|
-		 (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)
-		 \w*\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{2,4}/x;
+		 (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*
+		 \s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{2,4}/ix;
 
 sub new {
    my $type = shift;
@@ -319,9 +320,7 @@ sub parseinfo {
 	 $self->{"Date"} = $1;
       } elsif (not $numsongs
 	       and not exists $self->{Source}
-	       and ($line =~ $venues or
-		    $line =~ /\b$states\b/ or
-		    $line =~ $countries)
+	       and ($line =~ /\b($venues|$states|$countries)/)
 	       and not $indisc) {
 	 $self->{"Venue"} .= " - " if exists $self->{"Venue"};
 	 $self->{"Venue"} .= $line;
