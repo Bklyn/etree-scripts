@@ -1,9 +1,9 @@
 #!/usr/bin/perl -w
 #
 # shn2mp3 - Convert a directory of SHN files (hopefully stored in a
-# semi-etree.org-compliant structure) into a directory of MP3 files
-# with informative tags.  Uses logic from the "makehbx" script to
-# parse any info file stored with the SHN files to get information
+# semi-etree.org-compliant structure) into a directory of MP3 or OGG
+# files with informative tags.  Uses logic from the "makehbx" script
+# to parse any info file stored with the SHN files to get information
 # like the band name, venue, track names and recording source.
 #
 # $Id$
@@ -30,8 +30,7 @@ $version =~ s/^.Revision:\s+//; $version =~ s/\s*\$\s*$//;
 my $debug = 0;
 my $writefiles = 0;
 my $force = 0;
-my $lame = "lame";
-my $lameopts;
+my $encoderopts = "";
 my $bitrate = 192;
 my $quality = 2;
 my $target = ".";
@@ -39,6 +38,15 @@ my $test = 0;
 my $help = 0;
 my %OUTPUT;
 my $rcfile = "$ENV{HOME}/.${progname}rc";
+my $output_type = ($progname =~ /(ogg|mp3)$/ ? $1 : "mp3");
+my %ENCODER = ( "mp3" => ("lame -b %BITRATE% -q %QUALITY% --add-id3v2 " .
+			  "--ta %ARTIST% --tl %ALBUM% --tt %TITLE% " .
+			  "--tc %COMMENT% --ty %YEAR% --tn %TRACK% " .
+			  "%ENCODEROPTS% - %OUTFILE%" ),
+		"ogg" => ("oggenc -b %BITRATE% -q %QUALITY% " .
+			  "-a %ARTIST% -l %ALBUM% -t %TITLE% -N %TRACK% " .
+			  "-c %COMMENT% -o %OUTFILE% %ENCODEROPTS% -")
+	      );
 
 # ActiveState just can't get the job done.
 die "ActiveState Perl not supported; install Cygwin (http://www.cygwin.com)\n"
@@ -77,11 +85,12 @@ format STDOUT =
 .
 
 sub version {
-   my $lameversion = `lame --version | head -1`;
-   chomp $lameversion;
+   my ($encoder, $rest) = split /\s/, $ENCODER{$output_type};
+   my $encoderversion = `$encoder --version | head -1`;
+   chomp $encoderversion;
 
    print <<EOF
-$progname version $version using $lameversion
+$progname version $version using $encoderversion
 
 Copyright 2002, Caleb Epstein
 
@@ -710,22 +719,22 @@ sub usage {
    $0 = basename $0;
 
    print <<EOF;
-$0 - Convert SHN files into MP3 file
+$0 - Convert SHN files into lossy-compressed \U$output_type\E files
 
 Usage: $0 [options] path-to-shns
 
 Options:
-  --lame l              Specify an alternate encoder.  Should support the
-                        same command line sytax as LAME (e.g. toolame).
-  --lameopts "a b c"    Pass through for additional arguments to LAME.
-  -b | --bitrate b      Specify bit-rate of MP3s.  Default is $bitrate.
-  -q | --quality q      Set LAME encoding "quality".  Best is 0, worst is 9.
-  -h | --high-quality   Equivalent to --quality 2.
-  -f | --fast           Equivalent to --quality 7.
+  --encoder-options "x" Additional arguments to pass to the \U$output_type\E encoder.
+  -b | --bitrate b      Specify bit-rate of output files.  Default is $bitrate.
+  -q | --quality q      Set encoding "quality".  Best is 0, worst is 9.
+  -h | --high-quality   Equivalent to --quality 2 in LAME, 7 in oggenc.
+  -f | --fast           Equivalent to --quality 7 in LAME, 2 in oggenc.
   --target t            Root directory where MP3s will be written.  Default is
                         the current working directory.
   --force               Force overwriting of existing MP3s.
   --test                Just print what would be done; do not encode anything.
+  --mp3                 Generate MP3 output.
+  --ogg                 Generate OGG output.
   --help                Generate this usage message and exit.
 EOF
    ;
@@ -737,17 +746,19 @@ if (-f $rcfile and open (RCFILE, $rcfile)) {
    close RCFILE;
 }
 
-my $retval = GetOptions ("lame=s" => \$lame,
-			 "lameopts=s" => \$lameopts,
+my $retval = GetOptions ("lameopts=s" => \$encoderopts,
+			 "encoder-options=s" => \$encoderopts,
 			 "b|bitrate=i" => \$bitrate,
 			 "target=s" => \$target,
 			 "test!" => \$test,
 			 "q|quality=i" => \$quality,
-			 "f|fast" => sub { $quality = 7; },
-			 "h|high-quality" => sub { $quality = 2; },
+			 "f|fast" => sub { $quality = "fast"; },
+			 "h|high-quality" => sub { $quality = "high"; },
 			 "force!" => \$force,
 			 "debug!" => \$debug,
 			 "help!" => sub { usage; exit (0); },
+			 "mp3!" => sub { $output_type = "mp3"; },
+			 "ogg!" => sub { $output_type = "ogg"; },
 			 "version!" => sub { version; exit (0); });
 
 if ($retval == 0 or $help or not scalar @ARGV) {
@@ -786,14 +797,14 @@ sub mkdir_p {
    }
 }
 
-sub mp3dir {
+sub outputdir {
    my $dir = shift;
-   my $mp3dir = "$target/" . basename ($dir);
-   $mp3dir =~ s/(\.shnf?)?$/.mp3f/i;
-   $mp3dir;
+   my $outputdir = "$target/" . basename ($dir);
+   $outputdir =~ s/(\.shnf?)?$/.${output_type}f/i;
+   $outputdir;
 }
 
-sub shn_to_mp3 {
+sub shn_to_lossy {
    my $info = shift;
    my $index = shift;
    my $file = $info->{"ShnIndex"}{$index}{"Filename"};
@@ -808,12 +819,12 @@ sub shn_to_mp3 {
    my $nth = $ALLINDEXES{$index} || 0;
 
    my $shndir = $info->{"Directory"};
-   my $mp3dir = mp3dir ($shndir);
+   my $outputdir = outputdir ($shndir);
 
-   mkdir_p $mp3dir unless $test or -d $mp3dir;
+   mkdir_p $outputdir unless $test or -d $outputdir;
 
-   my $mp3file = "$mp3dir/" . basename $file;
-   $mp3file =~ s/(\.wav)?\.shn$/.mp3/i;
+   my $outfile = "$outputdir/" . basename $file;
+   $outfile =~ s/(\.wav)?\.shn$/.$output_type/i;
 
    my $artist = $info->{"Band"} || "Unknown";
    my $album = $info->{"CanonicalDate"} || $info->{"Date"} || "Unknown";
@@ -837,26 +848,32 @@ sub shn_to_mp3 {
    my $tracktime = $info->{"Songs"}{$index}{"Time"} || "0:00";
    my $tracksecs = parsetime ($tracktime);
 
-   my $cmd = "shorten -x " . quotemeta ($file) . " - | $lame " .
-     # For some reason which is not obvious, lame requires the input
-     # to be byte-swapped when running in a pipeline on Windows.
-     # CAE - 11/5/02 - seems to depend heavily on the LAME version
-     # ($^O eq "cygwin" ? "-x " : "") .
-       "-b $bitrate -q $quality --add-id3v2" .
-	 " --tt " . quotemeta ($title) .
-	   " --ta " . quotemeta ($artist) .
-	     " --tl " . quotemeta ($album) .
-	       " --tc " . quotemeta ($comment) .
-		 " --ty " . int ($year) .
-		   " --tn " . int ($track) .
-		     (defined $lameopts ? " $lameopts" : "") .
-		       " - " . quotemeta ($mp3file) .
-			 ($debug ? "" : " > /dev/null 2>&1");
+   my $encoder = $ENCODER{$output_type};
 
-   my $skip = (-f $mp3file and -M $mp3file < -M $file and not $force);
+   if ($quality eq "fast") {
+      $quality = $output_type eq "mp3" ? 7 : 2;
+   } elsif ($quality eq "high") {
+      $quality = $output_type eq "mp3" ? 2 : 7;
+   }
+   
+   $encoder =~ s/%BITRATE%/$bitrate/g;
+   $encoder =~ s/%QUALITY%/$quality/g;
+   $encoder =~ s/%ARTIST%/\Q$artist\E/g;
+   $encoder =~ s/%ALBUM%/\Q$album\E/g;
+   $encoder =~ s/%TITLE%/\Q$title\E/g;
+   $encoder =~ s/%COMMENT%/\Q$comment\E/g;
+   $encoder =~ s/%YEAR%/\Q$year\E/g;
+   $encoder =~ s/%TRACK%/\Q$track\E/g;
+   $encoder =~ s/%ENCODEROPTS%/$encoderopts/g;
+   $encoder =~ s/%OUTFILE%/$outfile/g;
+
+   my $cmd = "shorten -x " . quotemeta ($file) . " - | $encoder" .
+     ($debug ? "" : " > /dev/null 2>&1");
+   
+   my $skip = (-f $outfile and -M $outfile < -M $file and not $force);
 
    @OUTPUT{"Destination", "Disc", "Track", "Time", "Title"} =
-     ($mp3dir, $disc, $track, $tracktime, $title);
+     ($outputdir, $disc, $track, $tracktime, $title);
    $OUTPUT{"Disc"} = "$disc/$info->{Discs}"
      if defined $info->{"Discs"} and $info->{"Discs"} > 1;
    $OUTPUT{"Track"} = "$track/$info->{Disc}{$disc}{Tracks}"
@@ -876,7 +893,7 @@ sub shn_to_mp3 {
    }
 
    if ($status != 0) {
-      unlink $mp3file;		# Don't keep around a potentially short file
+      unlink $outfile;		# Don't keep around a potentially short file
 
       my $signal = $status & 127;
       my $core = $status & 128;
@@ -899,10 +916,10 @@ sub shn_to_mp3 {
 	 $OUTPUT{"Title"} = "Encode speed " .
 	   sprintf ("%.1fx", $tracksecs / $encodetime);
       } else {
-	 $OUTPUT{"Title"} = "MP3 size " . bytes_to_human (-s $mp3file);
+	 $OUTPUT{"Title"} = "File size " . bytes_to_human (-s $outfile);
 	 if ($skip) {
 	    $OUTPUT{"Title"} .= ", created " .
-	      strftime ("%m/%d/%y %H:%M", localtime ((stat $mp3file)[10]));
+	      strftime ("%m/%d/%y %H:%M", localtime ((stat $outfile)[10]));
 	 }
       }
       write;
@@ -958,15 +975,15 @@ foreach my $dir (@ARGV) {
    # Copy the info file
    if (not $test and exists $INFO{"InfoFile"}) {
       my $source = $INFO{"InfoFile"};
-      my $dest = mp3dir ($dir) . "/" . basename ($source);
-      mkdir_p (mp3dir ($dir));
+      my $dest = outputdir ($dir) . "/" . basename ($source);
+      mkdir_p (outputdir ($dir));
       if (not -f $dest or -M $source < -M $dest or $force) {
 	 copy ($source, $dest);
       }
    }
 
-   # Make the MP3s
+   # Encode the files
    foreach my $index (sort { $a <=> $b } keys %{$INFO{"ShnIndex"}}) {
-      shn_to_mp3 \%INFO, $index;
+      shn_to_lossy \%INFO, $index;
    }
 }
