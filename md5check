@@ -94,14 +94,14 @@ sub print_summary {
    return unless $ok or $errors or $missing;
 
    $file ||= "Summary";
-   my $status = ($errors ? "ERROR" : ($missing ? "WARNING" : "All OK"));
+   my $status = ($errors ? "ERROR: " : ($missing ? "WARNING: " : "All "));
    my @SUMMARY;
 
    push (@SUMMARY, plural ($ok, "file") . " OK") if $ok;
    push (@SUMMARY, plural ($errors, "error")) if $errors;
    push (@SUMMARY, plural ($missing, "missing file")) if $missing;
 
-   print "$file: $status: " . join (", ", @SUMMARY) . "\n";
+   print "$file: $status" . join (", ", @SUMMARY) . "\n";
 }
 
 # check_file - look for MD5 checksums in a file (FLAC "fingerprint"
