@@ -71,7 +71,7 @@ binary-indep: build install
 #	dh_installcron
 #	dh_installmenu
 #	dh_installexamples
-	dh_installdocs
+	dh_installdocs README
 	dh_installchangelogs ChangeLog
 	dh_perl
 	dh_link
