@@ -6,6 +6,10 @@ etree-scripts (2.0-1) unstable; urgency=low
     WAV files to FLAC files with sensible tags.  Can be used to convert
     SHN > FLAC, FLAC > FLAC + tags or WAV > FLAC (e.g. for seeding shows!)
   * md5check will check FLAC fingerprints in addition to MD5s.
+  * Added POD documentation (and ergo man pages!) to md5check, shn2mp3 and
+    flacify
+  * Use Perl's MakeMaker module instead of a Makefile.
+  * Removed the "shn" script.  Use "flacify" instead.
   
  -- Caleb Epstein <cae@bklyn.org>  Mon,  9 Feb 2004 13:14:11 -0500
 
