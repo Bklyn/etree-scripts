@@ -159,7 +159,7 @@ foreach my $file (sort keys %FILES) {
 	       $NOT_CDDA{$wavfile} = 1;
 	    }
 	    if ($waveinfo->{"sample_rate"} != 44100) {
-	       print sprintf " *%.1 kHz*", $waveinfo->{"sample_rate"} / 1000;
+	       print sprintf " *%.1f kHz*", $waveinfo->{"sample_rate"} / 1000;
 	       $NOT_CDDA{$wavfile} = 1;
 	    }
 	    if ($waveinfo->{"channels"} != 2) {
