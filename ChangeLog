@@ -1,4 +1,59 @@
+2004-04-14  Caleb Epstein  <cae at bklyn dot org>
+
+	* Etree/InfoFile.pm: More parsing improvements
+
+	* debian/changelog: etree-script 2.1
+
+	* shn2mp3: Work more nicely on Windows.
+
+	* flacify: Work more nicely on Windows.  Handle no song titles better
+
+	* Makefile.PL: etree-scripts 2.1
+
+	* Etree/InfoFile.pm: Documentation (sparse) and parsing improvements
+
+2004-03-16  Caleb Epstein  <cae at bklyn dot org>
+
+	* md5check:
+	Put c:\program files\flac into the PATH when running on Windows.
+	Change directory to where the files live and pass only basenames to
+	metaflac/flac.  Strip \r\n from metaflac output on Cygwin.
+
+2004-03-08  Caleb Epstein  <cae at bklyn dot org>
+
+	* unshn: Fix sprintf when sample rate != 44.1 kHz
+
+2004-02-17  Caleb Epstein  <cae at bklyn dot org>
+
+	* Etree/InfoFile.pm:
+	Use relative paths to files.  Makes working with (e.g.) Cygwin when
+	you have to call non-Cygwin executables simpler.
+
+	* flacify: Change directory for each show
+
+2004-02-14  Caleb Epstein  <cae at bklyn dot org>
+
+	* META.yml: Adds requires
+
+	* README: Modified header/footer
+
+	* debian/rules: Added README
+
+	* debian/control, README: *** empty log message ***
+
+	* Makefile.PL: Added PREREQ_PM for required modules
+
+	* MANIFEST: Added README, INSTALL
+
+	* burn-shns, cdfill: Cleanups
+
+	* INSTALL, README: Version 2.0
+
 2004-02-13  Caleb Epstein  <cae at bklyn dot org>
+
+	* shn2ogg: Just call shn2mp3 --ogg
+
+	* ChangeLog: dh-make-perl
 
 	* MANIFEST, META.yml, Makefile.PL, debian/control, debian/copyright, debian/dirs, debian/rules, debian/substvars:
 	Reworked debian dir using dh-make-perl
