@@ -1,3 +1,9 @@
+etree-scripts (1.4-2) unstable; urgency=low
+
+  * Fix for relative paths in unshn.
+
+ -- Caleb Epstein <cae@bklyn.org>  Fri,  8 Nov 2002 10:04:51 -0500
+
 etree-scripts (1.4-1) unstable; urgency=low
 
   * burn-shns: handle being run without a directory name
