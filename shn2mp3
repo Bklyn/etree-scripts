@@ -59,13 +59,13 @@ $OUTPUT{"Venue"} || "Unknown"
 |      Source: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
 $OUTPUT{"Source"} || "Unknown"
 +-----------------------------------------------------------------------------+
-Disc# Track Time  Title / Comments
------ ----- ----- ----------------
+ Track  Time  Title / Comments
+------- ----- ----------------
 .
 
 format STDOUT =
-@>>>> @>>>> @>>>> @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-@OUTPUT{"Disc", "Track", "Time", "Title"}
+@>>>>>> @>>>> @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+@OUTPUT{"Track", "Time", "Title"}
 .
 
 sub version {
@@ -443,7 +443,8 @@ sub parseinfo {
 	  and $line !~ /\b(silver wrapper|presents|spotlight)\b/ix) {
 	 $arg->{"Band"} = $line;
       } elsif (not $numsongs
-	       and ($line =~ /($venues)/ix or $line =~ /\b($states)\b/)) {
+	       and ($line =~ /($venues)/ix or $line =~ /\b($states)\b/)
+	       and not $indisc) {
 	 $arg->{"Venue"} .= " - " if exists $arg->{"Venue"};
 	 $arg->{"Venue"} .= $line;
       } elsif ($line =~ /^(source|src):/i or
@@ -511,7 +512,7 @@ sub parseinfo {
 
        	 ++$numsongs;
 	 $lastsong = $songnum;
-	 $lastdisc = $discnum;
+	 $lastdisc = $indisc = $discnum;
 	 $lastindex = $index;
       } elsif ($line =~ /^([\*\@\#\$\%\^]+)\s*[-=:]?\s*(.+)/
 	       and exists $arg->{"Notes"}{$1}) {
@@ -536,7 +537,8 @@ sub parseinfo {
    # Still no date?  Try and get it from the directory name
    if (not exists $arg->{"Date"}) {
       my $base = basename $arg->{"Directory"};
-      if (defined $base and $base =~ /^.+-?(\d{2,4})-(\d{1,2})-(\d{1,2})(-.+)?\./) {
+      if (defined $base and
+	  $base =~ /^.+-?(\d{2,4})-(\d{1,2})-(\d{1,2})(-.+)?\./) {
 	 $arg->{"Date"} = "$2/$3/$1";
       }
    }
@@ -777,6 +779,15 @@ sub shn_to_mp3 {
    my $index = shift;
    my $file = $info->{"ShnIndex"}{$index}{"Filename"};
 
+   # We want to number the tracks from 1 -> n where there are n tracks
+   # in the entire show.  This way we can tag every file with the same
+   # album.
+   my $n = 0;
+   my %ALLINDEXES = map { $_ => ++$n }
+     sort { $a <=> $b } keys %{$info->{"ShnIndex"}};
+   my $howmany = scalar keys %ALLINDEXES;
+   my $nth = $ALLINDEXES{$index} || 0;
+
    my $shndir = $info->{"Directory"};
    my $mp3dir = mp3dir ($shndir);
 
@@ -788,10 +799,15 @@ sub shn_to_mp3 {
    my $artist = $info->{"Band"} || "Unknown";
    my $album = $info->{"CanonicalDate"};
    my ($disc, $track) = (int ($index / 100), $index % 100);
+   $track = $nth if $howmany < 256;
    my $title = $info->{"Songs"}{$index}{"Title"} || "";
-   $title = sprintf ("Track %02d", $track) unless length $title;
+   $title = sprintf (($howmany > 99
+		      ? "Track %03d of %03d"
+		      : "Track %02d of %02d"),
+		     $track, $howmany)
+     unless length $title;
 
-   if (defined $info->{"Discs"} and $info->{"Discs"} > 1) {
+   if ($howmany > 256 and defined $info->{"Discs"} and $info->{"Discs"} > 1) {
       $album .= " [$disc/$info->{Discs}]";
    }
    if ($info->{"Venue"}) {
@@ -825,6 +841,8 @@ sub shn_to_mp3 {
      if defined $info->{"Discs"} and $info->{"Discs"} > 1;
    $OUTPUT{"Track"} = "$track/$info->{Disc}{$disc}{Tracks}"
      if exists $info->{Disc} and exists $info->{Disc}{$disc};
+   $OUTPUT{"Track"} = sprintf (($howmany > 99
+				? "%3d/%3d" : "%2d/%2d"), $nth, $howmany);
    $OUTPUT{"Time"} =~ s/\.\d+$//;
    write;
 
