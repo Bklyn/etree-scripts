@@ -1,3 +1,6 @@
+README
+INSTALL
+MANIFEST
 burn-shns
 cdfill
 ChangeLog
@@ -11,9 +14,7 @@ flacify
 make-toc
 Makefile.PL
 makehbx
-MANIFEST
 md5check
-parseinfo
 shn2mp3
 shn2ogg
 unshn
