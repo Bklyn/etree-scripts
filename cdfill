@@ -12,11 +12,9 @@
 
 use Getopt::Long;
 
-push (@ARGV, glob ("*.wav *.shn *.WAV *.SHN")) unless scalar @ARGV;
-
 my $rename = 0;
 my $prefix;
-my $cdlen = 74;
+my $cdlen = 80;
 my $cd = 1;
 my $track = 1;
 my $time = 0;
@@ -25,13 +23,17 @@ my $retval = GetOptions ("prefix=s" => \$prefix,
 			 "rename!" => \$rename,
 			 "cdlen=f" => \$cdlen);
 
+push (@ARGV, glob ("*.[Ww][Aa][Vv] *.[Ss][Hh][Nn] *.[Ff][Ll][Aa][Cc]"))
+  unless scalar @ARGV;
+
 sub shnlen {
    my @FILES = @_;
    my %LEN;
 
    my $fnregex = "(" . join ("|", map { quotemeta } @FILES) . ")";
 
-   open (SHNLEN, "shnlen @FILES|") or die "open pipe to shnlen: $!\n";
+   open (SHNLEN, "shntool len @FILES|")
+     or die "Unable to open pipe to shntool: $!\n";
 
    while (<SHNLEN>) {
       next unless /^\s*(\d+):(\d{2})\.(\d{2})\s+\d+\s+.*$fnregex/o;
@@ -76,7 +78,7 @@ foreach my $file (sort @ARGV) {
 
    $time += $len;
 
-   my $ext = $file; $ext =~ s/^.*\.(wav|shn)$/$1/i;
+   my $ext = $file; $ext =~ s/^.*\.(wav|shn|flac)$/$1/i;
 
    $NAMES{$file} = sprintf ("${prefix}d${cd}t%02d.$ext", $track++);
 

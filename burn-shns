@@ -2,8 +2,7 @@
 #
 # burn-shns
 #
-# Take a directory of SHN files and uncompress them and burn them on a
-# CD
+# Take a directory of SHN/FLAC files and burn them to a CD in DAO mode
 #
 # $Id$
 
@@ -24,5 +23,5 @@ cd $BURN_DIR
 # Remove any stray .wav, .bin and toc files
 rm -f *.wav toc data.bin
 
-echo Burning SHN files in "$@"
+echo "Burning files $@"
 unshn "$@" && time cdrecord -v -pad -dao -eject *.wav
