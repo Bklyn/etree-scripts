@@ -41,29 +41,14 @@ my $force = 0;
 my $encoderopts = "";
 my $bitrate = 192;
 my $quality = 3;
-my $preset = "standard";
+my $preset;
+my $altpreset = "standard";
 my $target = ".";
 my $test = 0;
 my $help = 0;
 my %OUTPUT;
 my $rcfile = "$ENV{HOME}/.${progname}rc";
 my $output_type = ($progname =~ /(ogg|mp3)$/ ? $1 : "mp3");
-my %DECODER = ( "shn" => "shorten -x %FILE% -",
-		"flac" => "flac -d -s -c %FILE%",
-		"mp3" => "mpg123 -q -s %FILE%",
-		"ogg" => "oggdec -q -o - %FILE%");
-
-my %ENCODER = ( "mp3" => ("lame " .
-			  "--alt-preset %PRESET% " .
-			  "--add-id3v2 " .
-			  "--ta %ARTIST% --tl %ALBUM% --tt %TITLE% " .
-			  "--tc %COMMENT% --ty %YEAR% --tn %TRACK% " .
-			  "%ENCODEROPTS% - %OUTFILE%" ),
-		"ogg" => ("oggenc -b %BITRATE% -q %QUALITY% " .
-			  "-a %ARTIST% -l %ALBUM% -t %TITLE% -N %TRACK% " .
-			  "-c %COMMENT% -d %YEAR% " .
-			  "-o %OUTFILE% %ENCODEROPTS% -")
-	      );
 
 # ActiveState just can't get the job done.
 die "ActiveState Perl not supported; install Cygwin (http://www.cygwin.com)\n"
@@ -104,24 +89,6 @@ format STDOUT =
 @>>>>>> @>>>> @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 @OUTPUT{"Track", "Time", "Title"}
 .
-
-sub version {
-   my ($encoder, $rest) = split /\s/, $ENCODER{$output_type};
-   my $encoderversion = `$encoder --version | head -1`;
-   chomp $encoderversion;
-
-   print <<EOF
-$progname version $version using $encoderversion
-
-Copyright 2002, Caleb Epstein
-
-Copying and modification permitted only under the terms of the Perl
-Artistic License, the text of which is available at <URL:
-http://www.perl.com/language/misc/Artistic.html>
-
-EOF
-  ;
-}
 
 # Types of audio files we recognize, by extension
 my @AUDIOEXT = ("shn", "mp3", "ogg", "flac");
@@ -222,17 +189,22 @@ Usage: $0 [options] path-to-shns
 
 Options:
   --encoder-options "x" Additional arguments to pass to the \U$output_type\E encoder.
-  -b | --bitrate b      Specify bit-rate of output files for oggenc.
-                        Default is $bitrate.
+  -b | --bitrate b      Specify a constant bit-rate encoding instead of a VBR
+                        preset.  This is also used when encoding OGG files.
+                        Default is 192.
   -q | --quality q      Set oggenc encoding quality.  Worst is 0, best is 10.
                         Default is 3.
-  --preset p            Specify LAME encoder preset.  Default is $preset.
+  --alt-preset p        Specify LAME encoder VBR alt-preset (deprecated, but
+                        "standard" is the default).
+  --preset p            Specify LAME encoder preset.  Overrides --alt-preset.
   --target t            Root directory where MP3s will be written.  Default is
                         the current working directory.
   --force               Force overwriting of existing MP3s.
   --test                Just print what would be done; do not encode anything.
-  --mp3                 Generate MP3 output.
-  --ogg                 Generate OGG output.
+  --mp3                 Generate MP3 output.  This is the default if the script
+                        is invoked as "shn2mp3".
+  --ogg                 Generate OGG output.  This is the default if the script
+                        is invoked as "shn2ogg".
   --help                Generate this usage message and exit.
 EOF
    ;
@@ -246,8 +218,15 @@ if (-f $rcfile and open (RCFILE, $rcfile)) {
 
 my $retval = GetOptions ("lameopts=s" => \$encoderopts,
 			 "encoder-options=s" => \$encoderopts,
-			 "b|bitrate=i" => \$bitrate,
-			 "preset=s" => \$preset,
+			 "b|bitrate=i" => sub { undef $preset;
+						undef $altpreset;
+						$bitrate = $_[1]; },
+			 "alt-preset=s" => sub { undef $bitrate;
+						 undef $preset;
+						 $altpreset = $_[1]; },
+			 "preset=s" => sub { undef $bitrate;
+					     undef $altpreset;
+					     $preset = $_[1]; },
 			 "target=s" => \$target,
 			 "test!" => \$test,
 			 "q|quality=i" => \$quality,
@@ -258,11 +237,50 @@ my $retval = GetOptions ("lameopts=s" => \$encoderopts,
 			 "help!" => sub { usage; exit (0); },
 			 "mp3!" => sub { $output_type = "mp3"; },
 			 "ogg!" => sub { $output_type = "ogg"; },
-			 "version!" => sub { version; exit (0); });
+			 "version!" => sub { version(); exit (0); });
 
 if ($retval == 0 or $help or not scalar @ARGV) {
    usage;
    exit (not $help);
+}
+
+my %DECODER = ( "shn" => "shorten -x %FILE% -",
+		"flac" => "flac -d -s -c %FILE%",
+		"mp3" => "mpg123 -q -s %FILE%",
+		"ogg" => "oggdec -q -o - %FILE%");
+
+my %ENCODER = ( "mp3" => ("lame " .
+			  (defined $preset ?
+			   "--preset %PRESET% " :
+			   defined $altpreset ?
+			   "--alt-preset %ALTPRESET% " :
+			   "-b %BITRATE% -q %QUALITY% ") .
+			  "--add-id3v2 --pad-id3v2 " .
+			  "--ta %ARTIST% --tl %ALBUM% --tt %TITLE% " .
+			  "--tc %COMMENT% --ty %YEAR% --tn %TRACK% " .
+			  "%ENCODEROPTS% - %OUTFILE%" ),
+		"ogg" => ("oggenc -b %BITRATE% -q %QUALITY% " .
+			  "-a %ARTIST% -l %ALBUM% -t %TITLE% -N %TRACK% " .
+			  "-c %COMMENT% -d %YEAR% " .
+			  "-o %OUTFILE% %ENCODEROPTS% -")
+	      );
+
+sub version {
+   my ($encoder, $rest) = split /\s/, $ENCODER{$output_type};
+   my $encoderversion = `$encoder --version | head -1`;
+   chomp $encoderversion;
+
+   print <<EOF
+$progname version $version using $encoderversion
+
+Copyright 2002, Caleb Epstein
+
+Copying and modification permitted only under the terms of the Perl
+Artistic License, the text of which is available at <URL:
+http://www.perl.com/language/misc/Artistic.html>
+
+EOF
+  ;
 }
 
 sub mkdir_p {
@@ -344,9 +362,10 @@ sub lossless_to_lossy {
    }
 
    $decoder =~ s/%FILE%/\Q$file\E/g;
-   $encoder =~ s/%BITRATE%/$bitrate/g;
    $encoder =~ s/%QUALITY%/$quality/g;
-   $encoder =~ s/%PRESET%/$preset/g;
+   $encoder =~ s/%BITRATE%/$bitrate/g if defined $bitrate;
+   $encoder =~ s/%ALTPRESET%/$altpreset/g if defined $altpreset;
+   $encoder =~ s/%PRESET%/$preset/g if defined $preset;
    $encoder =~ s/%ARTIST%/\Q$artist\E/g;
    $encoder =~ s/%ALBUM%/\Q$album\E/g;
    $encoder =~ s/%TITLE%/\Q$title\E/g;
