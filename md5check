@@ -12,6 +12,7 @@ use strict;
 use File::Find;
 use File::Basename;
 use File::Spec;
+use Cwd;
 
 $File::Find::dont_use_nlink = 1;
 
@@ -163,11 +164,14 @@ sub check_file {
    my $ok = 0;
    my $errors = 0;
    my $missing = 0;
+   my $oldcwd = getcwd();
 
    if (not open (MD5, $sumfile)) {
       warn "$progname: unable to open file $sumfile: $!\n";
       return (0, 1, 0);
    }
+
+   chdir ($dir) or die "Can't chdir to $dir: $!\n";
 
    my $data;
 
@@ -195,7 +199,10 @@ sub check_file {
    # Sort by filename
    @SUMS = sort { $$a[0] cmp $$b[0] } @SUMS;
 
-   return (0, 0, 0) unless scalar @SUMS;
+   if (not scalar @SUMS) {
+      chdir ($oldcwd);
+      return (0, 0, 0);
+   }
 
    print "Checking $base (" . plural (scalar (@SUMS), "file") . "):\n";
 
@@ -203,7 +210,7 @@ sub check_file {
 
    foreach (@SUMS) {
       my ($file, $sum, $func) = @{$_};
-      my $fullfile = "$dir/$file";
+      my $fullfile = $file;
 
       print " checking $file: ";
 
@@ -240,6 +247,8 @@ sub check_file {
 
    print_summary ($ok, $errors, $missing, $base);
    print "\n";
+
+   chdir ($oldcwd);
 
    return ($ok, $errors, $missing);
 }
@@ -321,7 +330,7 @@ sub check_flacfiles {
 my %CHECKERS = ( '\.(ffp|md5|txt)$' => \&check_file,
 		 '\.flac$' => [ \&check_flacfiles ]);
 
-push (@ARGV, ".") unless scalar @ARGV;
+push (@ARGV, getcwd ()) unless scalar @ARGV;
 
 my %TODO;
 
