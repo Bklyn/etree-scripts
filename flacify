@@ -14,8 +14,10 @@ use Getopt::Long;
 use File::Copy;
 use Data::Dumper;
 use File::Spec;
+use Cwd;
 
 my $progname = basename $0;
+my $rcsid = q$Id$;
 (my $version = q$Revision$) =~ s/^.Revision:\s+([\d\.]+)\s.+/$1/;
 my $debug = 0;
 my $dryrun = 0;
@@ -33,29 +35,12 @@ foreach my $exe (keys %EXES) {
 # Line buffering
 $| = 1;
 
-sub usage {
-   print <<EOF
-$progname - Convert audio files to FLAC files with tags
-
-Usage: $progname [options] directory [directory ...]
-
-Options:
-  --debug     Print extra debugging info.
-  --discs     Number tracks per-disc.  May not sort properly on some players.
-  --dry-run   Print what would be done, but don't actually do it.
-  --version   Print version information and exit
-  --help      Print this usage message and exit
-EOF
-;
-}
-
 GetOptions ("debug!" => \$debug,
 	    "discs!" => \$tagdiscs,
 	    "dry-run!" => \$dryrun,
-	    "help!" => sub { usage; exit 0; },
-	    "version!" => sub { print "$progname " .
-				  q$Id$ . "\n";
-				exit 0; } );
+	    "help!" => sub { use Pod::Usage;
+			     pod2usage (-exitval => 0, -verbose => 1); },
+	    "version!" => sub { print "$progname $rcsid\n"; exit (0); });
 
 # findexe - find a binary in the PATH
 sub findexe {
@@ -78,7 +63,6 @@ sub findexe {
 }
 
 sub numeric { $a <=> $b }
-
 sub setlist_order {
    if (not defined $a) {
       return defined $b ? 1 : 0;
@@ -126,6 +110,7 @@ sub convert_files {
    my $info = shift;
    my $songs = shift;
    my $files = shift;
+   my $dir = $info->{Directory};
 
    # 1. SHN -> WAV
    my @SHNS = grep { /\.shn$/i } @$files;
@@ -146,10 +131,8 @@ sub convert_files {
 	unless -f $file or $dryrun;
       $file } @SHNS;
 
-   # Perhaps we are starting with WAV Files
-   if (not scalar @WAVS) {
-      @WAVS = grep { /\.wav$/i } @$files;
-   }
+   # Also add in any WAV files from the start
+   push (@WAVS, grep { /\.wav$/i } @$files);
 
    if (scalar @WAVS) {
       print "Converting WAV files to FLAC\n";
@@ -173,7 +156,7 @@ sub convert_files {
 	 }
       }
 
-      print "Groups:\n", Dumper (\%GROUPS) if $debug;
+      print "Groups (by $groupby):\n", Dumper (\%GROUPS) if $debug;
 
       # Reverse the mapping from group -> files to file -> group
       my %INDEX_GROUP;
@@ -187,7 +170,7 @@ sub convert_files {
 
       # Ensure that the number of file indexes in the %INDEX_GROUP hash
       # matches the total number of files to process
-      if (scalar keys %INDEX_GROUP != scalar @WAVS) {
+      if (0 and scalar keys %INDEX_GROUP != scalar @WAVS) {
 	 die "Logic Error: file batching created " .
 	   scalar (keys %GROUPS) . " file groups " .
 	     "comprising " . scalar (keys %INDEX_GROUP) .
@@ -197,7 +180,9 @@ sub convert_files {
 
       foreach my $group (sort setlist_order keys (%GROUPS)) {
 	 my @BATCH = sort numeric keys %{$GROUPS{$group}};
-	 my @FILES = map { $WAVS[$_] } @BATCH;
+	 my @FILES = map { $WAVS[$_] } grep { $_ <= $#WAVS  } @BATCH;
+
+	 next unless scalar @FILES;
 
 	 print "Converting $groupby $group from WAV to FLAC, ",
 	   scalar (@FILES), " files:\n\t",
@@ -232,6 +217,8 @@ sub convert_files {
 	unless -s $file or $dryrun;
       $file } @WAVS);
 
+   @FLACS = sort { basename ($a) cmp basename ($b) } @FLACS;
+
    die "Number of FLAC files (" . scalar (@FLACS) . ") does not match " .
      "number of songs (" . scalar (@$songs) . ")\n"
        unless scalar @FLACS == scalar @$songs;
@@ -241,8 +228,6 @@ sub convert_files {
    tag_files ($info, $songs, \@FLACS) or die "Error tagging files\n";
 
    # 4. Move files to $info->{Directory}
-   my $dir = File::Spec->rel2abs ($info->{Directory});
-
    foreach my $file (@FLACS) {
       my $absfile = File::Spec->rel2abs ($file);
 
@@ -334,7 +319,12 @@ sub tag_files {
    1;
 }
 
+# Operate on CWD if nothing is specified
+if (not scalar @ARGV) { push (@ARGV, "."); }
+
 foreach my $dir (@ARGV) {
+   $dir = File::Spec->rel2abs ($dir);
+
    if (not -d $dir) {
       warn "$dir: not a directory\n";
       next;
@@ -349,7 +339,7 @@ foreach my $dir (@ARGV) {
    print "Etree::InfoFile dump:\n" . Dumper ($info) if $debug;
 
    print "Artist: ", $info->artist || "Unknown", "\n",
-     "  Date: ", $info->date || "Unknown", "\n", 
+     "  Date: ", $info->date || "Unknown", "\n",
        " Venue: ", $info->venue || "Unknown", "\n",
 	 "Source: ", $info->source || "Unknown", "\n\n";
 
@@ -379,3 +369,162 @@ foreach my $dir (@ARGV) {
 
    convert_files ($info, \@SONGS, \@FILES) or die "Error converting files\n";
 }
+
+__END__
+
+=head1 NAME
+
+flacify - Convert audio files to FLAC files with Vorbis comments
+
+=head1 SYNOPSIS
+
+flacify [options] directory [directory ...]
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--help>
+
+Generate this usage message and exit.
+
+=item B<--version>
+
+Print version information and exit.
+
+=item B<--debug>
+
+Turn on debugging mode.  Dumps copious output useful mostly to the
+maintainer.
+
+=item B<--discs>
+
+Keep tracks grouped by discs and use the Ogg Vorbis DISCNUMBER comment
+field to distinguish one disc from another.  Some players do not honor
+this tag and so will sort track 1 of each disc before track 2 of any
+disc (e.g. playback might run D1T1, D2T1, D1T2, ...).  The default is
+to number tracks sequentially from 1 to I<n> with no regard to any
+disc groups.
+
+=item B<--dry-run>
+
+Print what commands would be run, but don't run them.
+
+=back
+
+=head1 DESCRIPTION
+
+The purpose of L<flacify> is to convert audio files from WAVE, Shorten
+or FLAC format into losslessly-compressed, B<tagged> FLAC files.  The
+code is geared towards processing live concert recordings arranged
+according to the standards of L<http://etree.org/>.  The audio files
+must be accompanied by a text file which provides detailed
+information about the artist, date, venue and track list of the
+recording.
+
+For each directory the user specifies, L<flacify> performs the
+following steps:
+
+=over
+
+=item Parsing
+
+The directory is processed by the the L<Etree::InfoFile> module, which
+searches for audio files and text files in the directory.  Text files
+are parsed for the name of the artist, venue, date, song names,
+recording source, and other information.  These will be used in the
+tagging process.
+
+If no text files can be found, an error is emitted and the directory is
+not processed.
+
+If the input files are all FLAC files, we skip ahead to the
+L<"Tagging"> step.
+
+=item Decompression
+
+Uncompressing any SHN files to WAV files using the L<unshn> script,
+also from the etree-script distribution.  If the input consists of
+only WAV files, this step is skipped.  FLAC files are not
+decompressed either.
+
+At the end of this step we are left will all WAV or FLAC files.
+
+=item Compression
+
+Any WAV files resulting from the previous step are then compressed
+using the command line L<flac> encoder.  The following options are
+passed to L<flac>: --sector-align --delete-input-file --replay-gain.
+
+=item Tagging
+
+We are now left with all FLAC files.  These are tagged with the
+information from the L<"Parsing"> step.  The tagging uses these fields
+as specified by L<http://www.xiph.org/ogg/vorbis/doc/v-comment.html>:
+
+=over
+
+=item ARTIST
+
+The performer.  Usually taken from the first line of the info file.
+
+=item ALBUM
+
+The date of the performance in YYYY-MM-DD format followed by the venue
+information (e.g. "2003-01-01 Lupo's Hearbreak Hotel - Providence,
+RI")
+
+=item DATE
+
+The date of the performance in YYYY-MM-DD format.
+
+=item LOCATION
+
+The venue where the performance happened.
+
+=item SOURCEMEDIA
+
+The recording source information, if this was found.  Usually contains
+microphone, A/D converter, and recorder information.
+
+=item DISCNUMBER
+
+When run with B<--discs>, this tag will be set for each file.
+Otherwise it will not be set.
+
+=item TRACKNUMBER
+
+The number of each track in the set.  When run with B<--discs>, the
+TRACKNUMBER will be the number of the track within its disc, otherwise
+it will be the number of the track in the entire set.
+
+=item TITLE
+
+The name of the song.
+
+=item COMMENT
+
+If there are any notes found for a given song, they will be included
+in this tag.
+
+=back
+
+=item Directory Renaming
+
+Finally, the directory is renamed to end in ".flac16".  If the
+directory name previously ended in ".shn" or ".shnf", that suffix is
+removed.
+
+=back
+
+=head1 VERSION
+
+$Id$
+
+=head1 SEE ALSO
+
+L<unshn>, L<shorten>, L<flac>, L<metaflac>, L<Etree::InfoFile>
+
+=head1 AUTHOR
+
+Caleb Epstein E<lt>cae at bklyn dot orgE<gt>
