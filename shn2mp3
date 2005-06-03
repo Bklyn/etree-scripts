@@ -252,6 +252,7 @@ my %ENCODER = ( "mp3" => ("lame " .
 			  "-o %OUTFILE% %ENCODEROPTS% -")
 	      );
 
+# version - print version info
 sub version {
    my $encoder = $output_type eq "mp3" ? "lame" : "oggenc";
    my $encoderversion = `$encoder --version | head -1`;
@@ -260,7 +261,7 @@ sub version {
    print <<EOF
 $progname version $version using $encoderversion
 
-Copyright 2002, Caleb Epstein
+Copyright 2005, Caleb Epstein
 
 Copying and modification permitted only under the terms of the Perl
 Artistic License, the text of which is available at <URL:

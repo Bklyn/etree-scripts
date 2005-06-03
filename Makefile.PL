@@ -10,8 +10,8 @@ WriteMakefile (
 	       NAME => "etree-scripts",
 	       ABSTRACT => "Useful scripts for managing, converting, " .
 	       		   "and burning losslessly compressed audio files",
-	       VERSION => "2.3",
-	       AUTHOR => 'Caleb Epstein <cae@bklyn.org>',
+	       VERSION => "3.0",
+	       AUTHOR => 'Caleb Epstein <caleb.epstein@gmail.com>',
 
 	       EXE_FILES => [ "md5check", "unshn", "burn-shns",
 			      "cdfill", "makehbx", "shn2mp3", "shn2ogg",
