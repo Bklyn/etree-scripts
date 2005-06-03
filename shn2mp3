@@ -231,7 +231,8 @@ my %URLS = ( "shorten" => "http://etree.org/shnutils/shorten/",
 	     "lame" => "http://lame.sourceforge.net/");
 
 my %DECODER = ( "shn" => "shorten -x %FILE% -",
-		"flac" => "flac -d -s -c %FILE%",
+		"flac" => "flac -d -c --totally-silent " .
+		"--apply-replaygain-which-is-not-lossless %FILE%",
 		"mp3" => "mpg123 -q -s %FILE%",
 		"ogg" => "oggdec -q -o - %FILE%");
 
@@ -317,9 +318,7 @@ sub outputdir {
    # On Cygwin, LAME might not be compiled w/Cygwin and as such might
    # not work with paths like /c/mp3 etc.  Use a relative path
    # instead.
-   my $outputdir =
-     ($^O eq "cygwin" ? File::Spec->abs2rel ($target) : $target) .
-       "/" . basename ($dir);
+   my $outputdir = "$target/" . basename ($dir);
    $outputdir =~ s/(\.(shnf?|flac\d{0,2}f?|oggf?|mp3f?))?$/.${output_type}f/i;
    $outputdir;
 }
@@ -344,6 +343,9 @@ sub lossless_to_lossy {
    my ($disc, $track) = ($song->{Disc}, $song->{Track});
    $track = $index + 1;
    my $howmany = $info->num_tracks;
+   if (not $howmany) {
+      $howmany = $info->files ("shn") + $info->files ("flac");
+   }
    my $n_of_m = sprintf (($howmany > 99 ? "%3d/%3d" : "%2d/%2d"), $index + 1,
 			 $howmany);
    my $title = $song->{Title} || "";
@@ -495,15 +497,14 @@ foreach my $dir (map { File::Spec->rel2abs ($_) } @ARGV) {
    my @FILES = ($info->files ("flac"), $info->files ("shn"));
    my @SONGS = $info->songs;
 
-   if (scalar @FILES > scalar @SONGS) {
-      print "$dir: Number of songs parsed from info file (" . scalar (@SONGS) .
-	") does not match number of lossless audio files (" .
-	  scalar (@FILES) . ").  Please correct the info file.\n";
-      next;
-   }
-
    foreach my $index (0 .. $#FILES) {
-      lossless_to_lossy ($info, $FILES[$index], $SONGS[$index], $index)
+      my $song;
+      if ($index < scalar @SONGS) {
+	 $song = $SONGS[$index];
+      } else {
+	 $song = { Disc => 1, Track => 1 + $index, Title => "" };
+      }
+      lossless_to_lossy ($info, $FILES[$index], $song, $index)
 	or die "Error converting $FILES[$index] to $output_type\n";
    }
 }
