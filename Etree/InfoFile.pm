@@ -29,6 +29,7 @@
 package Etree::InfoFile;
 
 use strict;
+use Carp;
 use File::Basename;
 use File::Find;
 use POSIX qw(strftime);
@@ -52,6 +53,17 @@ my %WORD2NUM = ("one" => 1, "two" => 2, "three" => 3, "four" => 4, "five" => 5,
 
 my $numberwords = join ("|", keys %WORD2NUM);
 
+my $numrx = qr/\d+|$numberwords/i;
+
+# word2num - convert a word into a number
+sub word2num {
+   my $word = shift;
+   confess unless defined $word;
+   return int ($word) if $word =~ /^\d+$/;
+   confess unless exists $WORD2NUM{lc $word};
+   return $WORD2NUM{lc $word};
+}
+
 # Some regexps we use to recognize certain parts of the text file,
 # mostly taping related
 my $spots = qr/fob|dfc|btp|d?aud|d?sbd|soundboard|on(\s*|-)stage|matrix|
@@ -71,7 +83,7 @@ my $software = qr/cd-?wave?|mkwact|shn(?:v3)?|shorten|samplitude|
   cool[-\s]?edit|sound.?forge|wavelab/ix;
 my $venues = qr/(?:arts cent|theat)(?:er|re)|playhouse|arena|club|university|
   festival|lounge|room|cafe|field|house|airport|ballroom|college|hall|
-  auditorium/ix;
+  auditorium|village|temple/ix;
 my $states = qr/A[BLKZR]|BC|CA|CO|CT|DE|FL|GA|HI|I[DLNA]|KS|KY|LA|M[ABEDINSOT]|
   N[BCDEFVHJMSY]|O[HKNR]|P[AQ]|PEI|QC|RI|S[CDK]|TN|TX|UT|VT|VA|W[AVIY]|DC/x;
 my $countries;
@@ -93,9 +105,10 @@ my $trackre = qr/^\s*(?:d\d+)?t?(\d+) 	# sometimes you see d<n>t<m>
 
 # A regex that matches most dates
 my $datefmt = qr/\d{4}[-\.\/]\d{1,2}[-\.\/]\d{1,2}|
-		 \d{1,2}[-\.\/]\d{1,2}[-\.\/]\d{2,4}|
-		 (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*
-		 \s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{2,4}/ix;
+  \d{1,2}[-\.\/]\d{1,2}[-\.\/]\d{2,4}|
+  (?:(?:mon|tue|wed|thu|fri|sat|sun)\w*,?\s*)?
+  (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*
+  \s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{2,4}/ix;
 
 =head1 METHODS
 
@@ -115,7 +128,7 @@ sub new {
    my $type = shift;
    my %param = @_;
    my $self = bless { %param }, $type;
-
+   $self->{Debug} ||= $debug;
    $self;
 }
 
@@ -235,22 +248,32 @@ sub readtext {
    }
 
    if (not defined $infofile) {
-      warn ref ($self) . "::readtext: No info file defined\n";
+      warn ref ($self) . "::readtext: No info file found\n";
       return;
    }
 
-   if (not open (INFOFILE, $self->{"Directory"} . "/$infofile")) {
+   if ($infofile !~ m@^/@) {
+      $infofile = $self->{Directory} . "/$infofile";
+   }
+
+   if (not open (INFOFILE, $infofile)) {
       warn ref ($self) . "::readtext: Unable to open $infofile: $!\n";
       return;
    }
 
-   while (<INFOFILE>) {
-      chomp;
-      s/\r//g;
-      my $line = $_;
+   {
+      local $/ = 0777;		# Slup the file in one go
+
+      $_ = <INFOFILE>;
+      s/\r\n/\n/g;		# DOS -> UNIX line endings
+      s/\r/\n/g;		# Mac -> UNIX
+      s/^[ \t]+//mg;		# Remove leading whitespace
+      s/[ \t]+$//mg;		# Remove trailing whitespace
+
+      my @P = split /\s*\n\n/;	# Split paras
 
       # add it to the array
-      push (@{$self->{"InfoFileLines"}}, $line);
+      push (@{$self->{"InfoFileParas"}}, @P);
    }
 
    close (INFOFILE);
@@ -283,7 +306,7 @@ sub parsetitle {
    my ($segue, $notes, $running_time, $set);
 
    # Strip off any running time from the end of the title
-   $title =~ s/\W?(\d+[:\.\']\d{2}([\":\.]\d+)?)\W?/
+   $title =~ s/\W?(\d+[:\.\']\d{2}([:\.\"]\d+)?)\W?/
      $running_time = $1; ""; /eg;
 
    # I've been seeing this a lot in some info files: whitespace,
@@ -311,13 +334,6 @@ sub parsetitle {
    ($title, $segue, $notes, $running_time, $set);
 }
 
-# word2num - convert a word into a number
-sub word2num {
-   my $word = shift;
-   return int ($word) if $word =~ /^\d+$/;
-   return $WORD2NUM{lc $word};
-}
-
 =item parseinfo
 
 Internal method used to parse the info file contents for disc numbers
@@ -328,119 +344,158 @@ and track names.  Should not be called directly.
 sub parseinfo {
    my $self = shift;
 
-   my $discnum = 1;		# start with disc 1
-   my $index = 0;
-   my $numsongs = 0;
-   my $lastsong = 0;
-   my $lastindex = 0;
-   my $lastdisc = 1;
-   my $indisc = 0;
-   my $haveall = 0;
-   my $set;
+   $self->{state} = { discnum => 1,
+		      lastsong => 0,
+		      lastindex => 0,
+		      lastdisc => 1,
+		      numsongs => 0,
+		      indisc => 0,
+		      haveall => 0,
+		      set => undef };
 
-   $self->{NumSongs} = 0 unless exists $self->{NumSongs};
+   my $state = $self->{state};
 
-   foreach my $line (@{$self->{"InfoFileLines"}}) {
-      # Strip whitespace
-      $line =~ s/^\s+//; $line =~ s/\s+$//;
+   $self->{NumSongs} ||= 0;
 
+   foreach my $para (@{$self->{"InfoFileParas"}}) {
+      # Ignore checksums
+      next if $para =~ /\b[\da-f]{32}\b/i;
+
+      if (not $state->{numsongs} and
+	  (not exists $self->{Band} or
+	   not exists $self->{Date} or
+	   not exists $self->{Venue})) {
+	 print ">BAND/VENUE/DATE<: $para\n" if $self->{Debug};
+	 $self->parseband ($para);
+      } elsif ($para =~ /^(?:source|src|xfer|transfer|seede[rd]|
+			   tape[rd]|recorded)\b/mix or
+	       $para =~ /\b($spots|$mics|$configs|$cables|$pres|$dats|
+			    $laptops|$digicards|$software)\b/) {
+	 print ">SOURCEINFO<: $para\n" if $self->{Debug};
+	 push (@{$self->{Source}}, $para);
+      } elsif ($para =~ /\b(cd|set|dis[ck]|volume|set)\b/i or
+	       $para =~ /^($numrx)/m) {
+	 print ">DISCINFO/TRACKINFO<: $para\n" if $self->{Debug};
+	 $self->parsetracks ($para);
+      } elsif ($para =~ /^([\*\@\#\$\%\^]+)\s*[-=:]?\s*/) {
+	 $self->parsetracks ($para);
+      } else {
+	 print ">ETC<: $para\n" if $self->{Debug};
+	 push (@{$self->{Etc}}, $para);
+      }
+   }
+
+   delete $self->{state};
+}
+
+sub parseband {
+   my $self = shift;
+   my $para = shift;
+   my $state = $self->{state};
+
+   foreach my $line (split /\n/, $para) {
+      $line =~ s/\s+$//;
       next unless length $line;
 
-      # looking for disc delimeters
-      if (not $numsongs and not exists $self->{"Band"}
-	  and $line !~ /\b($venues|$states|$countries|^(?:$datefmt))\b/ix) {
-	 $self->{"Band"} = $line;
-      } elsif ($line =~ /^(source|src)\b/i or
-	       $line !~ /^((trans|x)fer|conver(ted|sion))\b/i and
-	       $line =~ /\b($spots|$mics|$configs|$cables|$pres|$dats)\b/
-	       and not $indisc) {
-	 $line =~ s/^(source|src)\b:?\s*//i;
-	 if (length $line) {
-	    $self->{"Source"} .= " " if exists $self->{"Source"};
-	    $self->{"Source"} .= $line;
+    LOOP:
+      {
+	 if ($line =~ /\G($datefmt)[[:punct:]]?\s*/gc
+	     and not exists $self->{Date}) {
+	    $self->{Date} = $1;
+	    print(">DATE<: $1\n") if $self->{Debug};
+	    redo LOOP
 	 }
-      } elsif ($line =~ /^((?:trans|x)fer|conver(?:ted|sion))/i or
-	       $line =~ /($dats|$laptops|$digicards|$software)/
-	       and not $indisc) {
-	 $line =~ s/^((trans|x)fer|conver(ted|sion))\b:?\s*//i;
-	 if (length $line) {
-	    $self->{"Transfer"} .= " " if exists $self->{"Transfer"};
-	    $self->{"Transfer"} .= $line;
+	 if ($line =~ /\G((?:\w+\s*|[-[:punct:]]\s*)+)/gc) {
+	    # [-[:punct:]]?\s*/gcx) {
+	    if (not exists $self->{Band}) {
+	       $self->{Band} = $1;
+	       print(">BAND<: $1\n") if $self->{Debug};
+	    } else {
+	       push (@{$self->{Venue}}, $1);
+	       print(">VENUE<: $1\n") if $self->{Debug};
+	    }
+	    redo LOOP;
 	 }
-      } elsif ($line =~ /^(tape[rd]|recorded)/i) {
-	 $line =~ s/^(recorde|tape)(r|d)(\sby)?:?\s*//i;
-	 $self->{"Taper"} = $line;
-      } elsif ($line =~ /^seede[rd]/i) {
-	 $line =~ s/^seede(r|d)( by)?:?\s*//i;
-	 $self->{"Seeder"} = $line;
-      } elsif (not $numsongs and not exists $self->{"Date"} and
-	       $line =~ /($datefmt)/ix) {
-	 $self->{"Date"} = $1;
-      } elsif (not $numsongs
-	       and not exists $self->{Source}
-	       and ($line =~ /\b($venues|$states|$countries)/)
-	       and not $indisc) {
-	 $self->{"Venue"} .= " - " if exists $self->{"Venue"};
-	 $self->{"Venue"} .= $line;
-      } elsif ($line =~ /^\W*(c?d|dis[kc]|volume)\W*(\d+|$numberwords)\b/ix){
-	 $discnum = word2num ($2);
-	 $indisc = $discnum;
-	 $lastsong = 0;
-      } elsif ($line =~ /\bset\s*(\d+|$numberwords)\b/ix) {
-	 $set = word2num ($1);
+      }
+   }
+}
+
+sub parsetracks {
+   my $self = shift;
+   my $para = shift;
+   my $st = $self->{state};
+
+   local $SIG{__WARN__} = sub { confess };
+
+   my @L = split /\n/, $para;
+
+   my $discrx = qr/^\W*(c?d|dis[ck]|volume)\W*($numrx)\b/io;
+
+   foreach my $line (@L) {
+      if ($line =~ $discrx) {
+	 $st->{discnum} = word2num ($2);
+	 print "\t>DISC $st->{discnum}< $line\n" if $self->{Debug};
+	 $st->{indisc} = $st->{discnum};
+	 $st->{lastsong} = 0;
+      } elsif ($line =~ /\bset\s*($numrx)\b/i) {
+	 print "\t>SET< $line\n" if $self->{Debug};
+	 $st->{set} = word2num ($1);
       } elsif ($line =~ /^encore/i) {
-	 $set = "E";
-      } elsif ($line =~ /^(\d+)\s*(cd|dis[ck])s?/ix) {
-	 $self->{"Discs"} = $1;
-      } elsif (not $haveall and
-	       $line =~ $trackre and int ($1) > 0) {
+	 print "\t>SET< $line\n" if $self->{Debug};
+	 $st->{set} = "E";
+      } elsif ($line =~ /^($numrx)\s*(cd|dis[ck])s?\b/i) {
+	 print "\t>DISCS< $line\n" if $self->{Debug};
+	 $self->{"Discs"} = word2num ($1);
+      } elsif (not $st->{haveall} and
+	       $line =~ $trackre and
+	       (int ($1) == 1 || int ($1) == (1 + $st->{lastsong}))) {
+	 print "\t>TRACK< $line\n" if $self->{Debug};
 	 my $songnum = int $1;
 	 my ($title, $segue, $notes, $runtime, $maybeset) = parsetitle ($2);
-	 $set = $maybeset if defined $maybeset;
+	 $self->{set} = $maybeset if defined $maybeset;
 
-	 if ($lastsong and $songnum < $lastsong) {
-	    $indisc = ++$discnum;
+	 if ($st->{lastsong} and $songnum < $st->{lastsong}) {
+	    $st->{indisc} = ++$st->{discnum};
 	 }
 
-	 if ($debug) {
-	    local $SIG{__WARN__} = sub {};
-	    print "$line\n -> disc=$discnum title=$title " .
-	      "segue=$segue notes=$notes " .
-		"runtime=$runtime set=$set\n";
-	 }
-
-	 $self->{"Discs"} = $discnum
+	 $self->{"Discs"} = $st->{discnum}
 	   if not exists $self->{"Discs"} or
-	     $discnum > $self->{"Discs"};
-	 $self->{"Disc"}{$discnum}{"Tracks"} = $songnum
-	   if not exists $self->{"Disc"}{$discnum}{"Tracks"} or
-	     $songnum > $self->{"Disc"}{$discnum}{"Tracks"};
-	 $self->{"Songs"}[$index] = { Disc => $discnum,
-				      Track => $songnum,
-				      Index => $index,
-				      Set => $set,
-				      Title => $title,
-				      Line => $line };
-	 $self->{Songs}[$index]{Notes} = $notes if defined $notes;
-	 $self->{Songs}[$index]{Segue} = $segue if defined $segue;
-	 $self->{Songs}[$index]{Time} = $runtime if defined $runtime;
+	     $st->{discnum} > $self->{"Discs"};
+
+	 $self->{"Disc"}{$st->{discnum}}{"Tracks"} = $songnum
+	   if not exists $self->{"Disc"}{$st->{discnum}}{"Tracks"} or
+	     $songnum > $self->{"Disc"}{$st->{discnum}}{"Tracks"};
+
+	 my $song = { Disc => $st->{discnum},
+		      Track => $songnum,
+		      Set => $st->{set},
+		      Title => $title,
+		      Line => $line };
+
+	 $song->{Notes} = $notes if defined $notes;
+	 $song->{Segue} = $segue if defined $segue;
+	 $song->{Time} = $runtime if defined $runtime;
+
+	 push (@{$self->{"Songs"}}, $song);
+
 	 $self->{Notes}{$notes} ||= "" if defined $notes;
 
-	 ++$index;
-       	 ++$numsongs;
-	 $lastsong = $songnum;
-	 $lastdisc = $indisc = $discnum;
-	 $lastindex = $index;
+       	 $st->{numsongs}++;
+	 $st->{lastsong} = $songnum;
+	 $st->{lastdisc} = $st->{discnum};
+	 $st->{indisc} = $st->{discnum};
 
-	 if ($numsongs == $self->{"NumSongs"}) {
-	    print "Disc $discnum Song $songnum: have all needed song names\n"
-	      if $debug;
-	    $haveall = 1;
+	 if ($st->{numsongs} == $self->{"NumSongs"}) {
+	    print "Disc $st->{discnum} Song $songnum: " .
+	      "have all needed song names\n" if $self->{Debug};
+	    $st->{haveall} = 1;
 	 }
       } elsif ($line =~ /^([\*\@\#\$\%\^]+)\s*[-=:]?\s*(.+)/
 	       and exists $self->{"Notes"}{$1}) {
+	 print "\t>NOTE $1< $line\n" if $self->{Debug};
 	 $self->{"Notes"}{$1} .= $2;
-      } elsif ($line =~ /\w/) {
+      } else {
+	 print "\t>ETC< $line\n" if $self->{Debug};
 	 push (@{$self->{"Etc"}}, $line);
       }
    }
@@ -496,78 +551,14 @@ sub parseinfo {
 	       if ($y < 60) {
 		  $y += 2000;
 	       } else {
-		  $y += 1900; }
+		  $y += 1900;
+	       }
 	    }
 	    $self->{CanonicalDate} = sprintf ("%04d-%02d-%02d", $y, $m, $d);
 	 } elsif ($self->{Date} =~ m@^(\d{4})[-/](\d\d)[-/](\d\d)$@
-		 and $2 >= 1 and $2 <= 12
-		 and $3 >= 1 and $3 <= 31) {
+		  and $2 >= 1 and $2 <= 12
+		  and $3 >= 1 and $3 <= 31) {
 	    $self->{CanonicalDate} = sprintf ("%04d-%02d-%02d", $1, $2, $3);
-	 }
-      }
-   }
-
-   $self->altparseinfo unless $numsongs;
-}
-
-# altparseinfo - alternate parsing routine
-sub altparseinfo {
-   my $self = shift;
-
-   my $songnum = 0;
-   my $discnum = 1;		# start with disc 1
-   my $numsongs = 0;
-   my $index = 0;
-   my $indisc = 0;
-   my $set;
-
-   foreach my $line (@{ $self->{"InfoFileLines"}}) {
-      $line =~ s/^\s+//;
-      $line =~ s/\s+$//;
-
-      # looking for disc delimeters
-      if ($line =~ /^\W*(?:cd|dis[kc]|volume)\W*(\d+|$numberwords)\b/i) {
-	 $discnum = word2num ($1);
-	 $indisc = 1;
-	 $songnum = 0;
-	 next;
-      } elsif ($line =~ /^\W*set\s*(\d+|$numberwords)\b/ix) {
-	 $set = word2num ($1);
-      } elsif ($line =~ /^\W*encore\b/i) {
-	 $set = "E";
-      } elsif ($indisc) {
-	 # we are trying to interpret the case where the songs are not
-	 # numbered at all.  We will treat every non blank line as a
-	 # song name - except those lines whose contents are "set* and
-	 # encore* ...
-	 if ($line =~ /\w/) {
-	    $numsongs++;
-	    $songnum++;
-	    my ($title, $segue, $notes, $runtime, $maybeset) =
-	      parsetitle ($line);
-	    $set = $maybeset if defined $maybeset;
-
-	    # check that there is a matching index in the shn's
-	    if (exists $self->{"ShnIndex"}{$index}) {
-	       $self->{"Discs"} = $discnum;
-               $self->{"Disc"}{$discnum}{"Tracks"} = $songnum;
-	       $self->{Songs}[$index] = { Disc => $discnum,
-					  Track => $songnum,
-					  Set => $set,
-					  Title => $title,
-					  Time => $runtime };
-	       $self->{Songs}[$index]{Notes} = $notes if defined $notes;
-	       $self->{Songs}[$index]{Segue} = $segue if defined $segue;
-
-	       # Remove this from the "Etc" list if it is in there
-	       if (exists $self->{"Etc"}) {
-		  @{$self->{"Etc"}} = grep { $_ ne $line } @{$self->{"Etc"}};
-	       }
-
-	       ++$index;
-
-	       $indisc = 0 if $numsongs == $self->{"NumSongs"};
-	    }
 	 }
       }
    }
@@ -584,6 +575,11 @@ sub _wrap {
 	 last;
       }
    }
+
+   if (ref $value eq "ARRAY") {
+      $value = "@$value";
+   }
+
    $value;
 }
 
@@ -602,16 +598,12 @@ sub year { my $self = shift; my $cd = $self->_wrap ("CanonicalDate");
 	   else { return 0 } }
 sub venue { my $self = shift; $self->_wrap ("Venue"); }
 sub source { my $self = shift; $self->_wrap ("Source"); }
-sub transfer { my $self = shift; $self->_wrap ("Transfer"); }
-sub taper { my $self = shift; $self->_wrap ("Taper"); }
-sub seeder { my $self = shift; $self->_wrap ("Seeder"); }
 sub num_discs { my $self = shift; $self->_wrap ("Discs"); }
 
 sub album {
    my $self = shift;
    my $date = $self->date;
-   my $album = (defined $date ? "$date " : "");
-   $album .= $self->{Venue} if exists $self->{Venue};
+   my $album = (defined $date ? "$date " : "") . $self->venue;
    $album;
 }
 

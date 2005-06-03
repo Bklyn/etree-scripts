@@ -59,8 +59,7 @@ $| = 1;
 GetOptions ("debug!" => \$debug,
 	    "discs!" => \$tagdiscs,
 	    "dry-run!" => \$dryrun,
-	    "help!" => sub { use Pod::Usage;
-			     pod2usage (-exitval => 0, -verbose => 1); },
+	    "help!" => sub { exit system ("perldoc", $0) },
 	    "version!" => sub { print "$progname $rcsid\n"; exit (0); },
 	    "replay-gain!" => \$replay_gain,
 	    "tag=s%" => \%TAGFORMAT);
@@ -85,7 +84,9 @@ sub findexe {
    $fullpath;
 }
 
+# Sort helpers
 sub numeric { $a <=> $b }
+
 sub setlist_order {
    if (not defined $a) {
       return defined $b ? 1 : 0;
@@ -107,7 +108,8 @@ sub run_command {
    $COMMAND[0] = $EXES{$COMMAND[0]};
 
    if ($dryrun) {
-      print "DRYRUN: @COMMAND\n";
+      print "DRYRUN: " . join (" ", map { $_ =~ m/[\s[:punct:]]/ ? "'$_'" : $_ }
+			       @COMMAND) . "\n";
       return 0;
    }
 
@@ -279,10 +281,12 @@ sub convert_files {
 	scalar (@SHNS) . "\n";
    }
 
-   (my $newdir = $dir) =~ s/\.(shn|flac\d*)f?$//ig; $newdir .= ".flac16";
+   # Rename the directory to have a .flac16 extension
+   (my $newdir = $dir) =~ s/\.(wav|shn|flac\d*)f?$/.flac16/ig;
 
    if (not $dryrun and $newdir ne $dir) {
       print "Renaming $dir -> $newdir\n";
+      chdir ("..") or die "Unable to chdir: $!\n";
       rename ($dir, $newdir) or die "Rename failed: $!\n";
    }
 
@@ -300,7 +304,7 @@ sub tag_files {
 
    $VALUES{"ARTIST"} = $info->artist if $info->artist;
    $VALUES{"ALBUM"} = $info->album if $info->album;
-   $VALUES{"DATE"} = $info->date if $info->date;
+   $VALUES{"DATE"} = $info->year if $info->year;
    $VALUES{"LOCATION"} = $info->venue if $info->venue;
    $VALUES{"SOURCEMEDIA"} = $info->source if $info->source;
 
@@ -356,8 +360,8 @@ sub tag_files {
 
       my @TAGS;
       foreach my $tag (keys %TAGS) {
-	 push (@TAGS, "--remove-vc-field=$tag");
-	 push (@TAGS, "--set-vc-field=$tag=$TAGS{$tag}")
+	 push (@TAGS, "--remove-tag=$tag");
+	 push (@TAGS, "--set-tag=$tag=$TAGS{$tag}")
 	   if defined $TAGS{$tag};
       }
       my @CMD = ("metaflac", @TAGS, $files->[$index]);
@@ -418,7 +422,8 @@ foreach my $dir (map { File::Spec->rel2abs ($_) } @ARGV) {
       next;
    }
 
-   my $info = new Etree::InfoFile (Directory => $dir) or die;
+   my $info = new Etree::InfoFile (Directory => $dir,
+				   Debug => $debug) or die;
 
    $info->parse;
 
@@ -429,7 +434,8 @@ foreach my $dir (map { File::Spec->rel2abs ($_) } @ARGV) {
    print "Artist: ", $info->artist || "Unknown", "\n",
      "  Date: ", $info->date || "Unknown", "\n",
        " Venue: ", $info->venue || "Unknown", "\n",
-	 "Source: ", $info->source || "Unknown", "\n\n";
+	 "Source: ", $info->source || "Unknown", "\n",
+	   "\n";
 
    # Get the list of all possible audio files we will convert
    my @FILES = sort { $a cmp $b } $info->files ("flac"),
@@ -470,7 +476,7 @@ flacify [options] directory [directory ...]
 
 =head1 OPTIONS
 
-=over 8
+=over 4
 
 =item B<--help>
 
@@ -487,12 +493,12 @@ maintainer.
 
 =item B<--discs>
 
-Keep tracks grouped by discs and use the Ogg Vorbis DISCNUMBER comment
-field to distinguish one disc from another.  Some players do not honor
-this tag and so will sort track 1 of each disc before track 2 of any
-disc (e.g. playback might run D1T1, D2T1, D1T2, ...).  The default is
-to number tracks sequentially from 1 to I<n> with no regard to any
-disc groups.
+Keep tracks grouped by CD tracking boundaries and use the Ogg Vorbis
+DISCNUMBER comment field to distinguish one disc from another.  Some
+players do not honor this tag and so will sort track 1 of each disc
+before track 2 of any disc (e.g. playback might run D1T1, D2T1, D1T2,
+...).  The default is to number tracks sequentially from 1 to I<n>
+with no regard to any disc groups.
 
 =item B<--dry-run>
 
@@ -524,7 +530,7 @@ The purpose of L<flacify> is to convert audio files from WAVE, Shorten
 or FLAC format into losslessly-compressed, B<tagged> FLAC files.  The
 code is geared towards processing live concert recordings arranged
 according to the standards of L<http://etree.org/>.  The audio files
-must be accompanied by a text file which provides detailed
+should be accompanied by a text file which provides detailed
 information about the artist, date, venue and track list of the
 recording.
 
@@ -537,14 +543,14 @@ following steps:
 
 The directory is processed by the the L<Etree::InfoFile> module, which
 searches for audio files and text files in the directory.  Text files
-are parsed for the name of the artist, venue, date, song names,
-recording source, and other information.  These will be used in the
-tagging process.
+are parsed for the artist name, venue, date, song titles, recording
+source, and other information.  These will be used in the tagging
+process.
 
 If no text files can be found, an error is emitted and the directory is
 not processed.
 
-If the input files are all FLAC files, we skip ahead to the
+If the input files are already FLAC files, we skip ahead to the
 L<"Tagging"> step.
 
 =item Decompression
@@ -554,15 +560,15 @@ also from the etree-script distribution.  If the input consists of
 only WAV files, this step is skipped.  FLAC files are not
 decompressed either.
 
-At the end of this step we are left will all WAV or FLAC files.
+At the end of this step we are left will only WAV files.
 
 =item Compression
 
 Any WAV files resulting from the previous step are then compressed
 using the command line L<flac> encoder.  The following options are
-passed to L<flac>: --sector-align --delete-input-file --replay-gain.
-The --reply-gain option is omitted if the user passes --noreplay-gain
-to shn2mp3.
+passed to L<flac>: C<--sector-align --delete-input-file --replay-gain>
+The C<--reply-gain> option is omitted if the user passes the
+--noreplay-gain argument to flacify.
 
 =item Tagging
 
@@ -584,7 +590,7 @@ RI")
 
 =item DATE
 
-The date of the performance in YYYY-MM-DD format.
+The year of the performance in YYYY format.
 
 =item LOCATION
 
