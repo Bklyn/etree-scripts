@@ -477,7 +477,9 @@ foreach my $dir (map { File::Spec->rel2abs ($_) } @ARGV) {
    print "Etree::InfoFile dump:\n", Dumper ($info), "\n" if $debug;
 
    %OUTPUT = %$info;
-   $OUTPUT{"Source"} ||= "Unknown";
+   $OUTPUT{"Date"} = $info->date || "Unknown";
+   $OUTPUT{"Venue"} = $info->venue || "Unknown";
+   $OUTPUT{"Source"} = $info->source || "Unknown";
 
    $^L = "\n";
    STDOUT->format_lines_left (0);
