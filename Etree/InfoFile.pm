@@ -54,6 +54,7 @@ my %WORD2NUM = ("one" => 1, "two" => 2, "three" => 3, "four" => 4, "five" => 5,
 my $numberwords = join ("|", keys %WORD2NUM);
 
 my $numrx = qr/\d+|$numberwords/i;
+my $discrx = qr/^\b(c?d|dis[ck]|volume)\W*($numrx)\b/io;
 
 # word2num - convert a word into a number
 sub word2num {
@@ -350,12 +351,15 @@ sub parseinfo {
 		      lastdisc => 1,
 		      numsongs => 0,
 		      indisc => 0,
+		      index => 0,
 		      haveall => 0,
 		      set => undef };
 
    my $state = $self->{state};
 
    $self->{NumSongs} ||= 0;
+
+   local $SIG{__WARN__} = sub { confess };
 
    foreach my $para (@{$self->{"InfoFileParas"}}) {
       # Ignore checksums
@@ -424,34 +428,39 @@ sub parsetracks {
    my $self = shift;
    my $para = shift;
    my $st = $self->{state};
+   my $expectracks = 0;
 
-   local $SIG{__WARN__} = sub { confess };
-
-   my @L = split /\n/, $para;
-
-   my $discrx = qr/^\W*(c?d|dis[ck]|volume)\W*($numrx)\b/io;
-
-   foreach my $line (@L) {
+   foreach my $line (split /\n/, $para) {
       if ($line =~ $discrx) {
 	 $st->{discnum} = word2num ($2);
 	 print "\t>DISC $st->{discnum}< $line\n" if $self->{Debug};
 	 $st->{indisc} = $st->{discnum};
 	 $st->{lastsong} = 0;
+	 $expectracks = 1;
       } elsif ($line =~ /\bset\s*($numrx)\b/i) {
-	 print "\t>SET< $line\n" if $self->{Debug};
 	 $st->{set} = word2num ($1);
+	 print "\t>SET $st->{set}< $line\n" if $self->{Debug};
+	 $expectracks = 1;
       } elsif ($line =~ /^encore/i) {
-	 print "\t>SET< $line\n" if $self->{Debug};
+	 print "\t>SET E< $line\n" if $self->{Debug};
 	 $st->{set} = "E";
+	 $expectracks = 1;
       } elsif ($line =~ /^($numrx)\s*(cd|dis[ck])s?\b/i) {
 	 print "\t>DISCS< $line\n" if $self->{Debug};
 	 $self->{"Discs"} = word2num ($1);
+	 $expectracks = 1;
       } elsif (not $st->{haveall} and
-	       $line =~ $trackre and
-	       (int ($1) == 1 || int ($1) == (1 + $st->{lastsong}))) {
-	 print "\t>TRACK< $line\n" if $self->{Debug};
-	 my $songnum = int $1;
-	 my ($title, $segue, $notes, $runtime, $maybeset) = parsetitle ($2);
+	       (($line =~ $trackre and
+		 (int ($1) == 1 || int ($1) == (1 + $st->{lastsong}))) or
+		$expectracks)) {
+	 my $songnum = defined $1 ? int ($1) :
+	   exists $self->{Songs} ? 1 + scalar (@{$self->{Songs}}) : 1;
+	 my $fulltitle = defined ($2) ? $2 : $line;
+
+	 print "\t>TRACK $songnum< $line\n" if $self->{Debug};
+
+	 my ($title, $segue, $notes, $runtime, $maybeset) =
+	   parsetitle ($fulltitle);
 	 $self->{set} = $maybeset if defined $maybeset;
 
 	 if ($st->{lastsong} and $songnum < $st->{lastsong}) {
@@ -470,7 +479,8 @@ sub parsetracks {
 		      Track => $songnum,
 		      Set => $st->{set},
 		      Title => $title,
-		      Line => $line };
+		      Line => $line,
+		      Index => $st->{index}++ };
 
 	 $song->{Notes} = $notes if defined $notes;
 	 $song->{Segue} = $segue if defined $segue;
