@@ -13,6 +13,7 @@
 use Getopt::Long;
 
 my $rename = 0;
+my $dryrun = 0;
 my $prefix;
 my $cdlen = 80;
 my $cd = 1;
@@ -21,6 +22,7 @@ my $time = 0;
 
 my $retval = GetOptions ("prefix=s" => \$prefix,
 			 "rename!" => \$rename,
+			 "dry-run!" => \$dryrun,
 			 "cdlen=f" => \$cdlen);
 
 push (@ARGV, glob ("*.[Ww][Aa][Vv] *.[Ss][Hh][Nn] *.[Ff][Ll][Aa][Cc]"))
@@ -86,8 +88,46 @@ foreach my $file (sort @ARGV) {
    $CDS{$cd}{len} = $time;
 
    print "$file -> $NAMES{$file} [" . msfstring ($len) . "]\n";
+}
 
-   rename ($file, $NAMES{$file}) if $rename and $file ne $NAMES{$file};
+# We rename in two passes to prevent something like this:
+#
+# d1t10 -> d2t01
+# d2t01 -> d2t02
+# d2t02 -> ...
+#
+# Which would end up clobbering every file after d1t10.
+if ($rename) {
+   print "Renaming files\n";
+
+   my @RENAMES = sort grep { $_ ne $NAMES{$_} } keys %NAMES;
+
+   if ($dryrun) {
+      print join ("\n", map { "$_ -> $NAMES{$_}" } @RENAMES), "\n";
+   }
+
+   foreach my $file (@RENAMES) {
+      my $target = $NAMES{$file} . ".tmp";
+      if ($dryrun) {
+	 print "$file -> $target\n";
+      } else {
+	 die "Cannot rename $file -> $target: target file already exists\n"
+	   if -e $target;
+	 rename ($file, $target) or die "rename $file -> $target: $!\n";
+      }
+   }
+
+   foreach my $file (@RENAMES) {
+      my $source = $NAMES{$file} . ".tmp";
+      my $target = $NAMES{$file};
+      if ($dryrun) {
+	 print "$source -> $target\n";
+      } else {
+	 die "Cannot rename $source -> $target: target file already exists\n"
+	   if -e $target;
+	 rename ($source, $target) or die "rename $source -> $target: $!\n";
+      }
+   }
 }
 
 foreach my $cd (sort { $a <=> $b } keys %CDS) {
