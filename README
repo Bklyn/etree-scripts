@@ -3,42 +3,44 @@
  / _ \ __| '__/ _ \/ _ \_____/ __|/ __| '__| | '_ \| __/ __|
 |  __/ |_| | |  __/  __/_____\__ \ (__| |  | | |_) | |_\__ \
  \___|\__|_|  \___|\___|     |___/\___|_|  |_| .__/ \__|___/
-                                             |_| V2.0
+                                             |_| V3.0
 
-Announcing release 2.0 of etree-scripts, a set of (mostly) Perl
-scripts that is of use to those lossless audio freaks (like myself)
-who prefer to work from the command line.
+Announcing release 3.0 of etree-scripts, a set of (mostly) Perl
+scripts for lossless audio freaks who get busy on the command line.
 
 Some important changes in this long overdue release:
 
-* All new "flacify".  This program converts directories of WAV or SHN
-  files to well-tagged, CD sector-aligned FLAC files.  Run on existing
-  FLAC files, it adds/updates tags based on the show's info file.
-  Seeders can use it to do their WAV > FLAC encoding and get tagging
-  in the bargain.
+* Revamped parsing code.  The parser breaks up the info file first by
+  paragraphs and identifies their content broadly before splitting and
+  parsing things line-by-line.  The hope is that this leads to
+  better quality parsing overall.  I am working on a
+  Parse::RecDescent-based parser for the next major release.
 
-* FLAC support is in all of the scripts now, even though their names
-  might be "unshn" or "shn2mp3".
+* Much improved Cygwin support.  I use it myself now.  There is also a
+  standalone Cygwin tar file that can be used to install etree-scripts
+  and all prerequisites in a single step.  See INSTALL for more
+  info.
 
-* Modularized the info parsing code that is the core of flacify,
-  shn2mp3 and makehbx into a new Perl module called Etree::InfoFile.
-  The parsing has been improved a great deal from the last offical
-  release (1.4) and I hope others can make use of it.
+* Major improvements to the "flacify" command:
 
-* Added documentation to most of the scripts, resulting in
-  man pages, and more detailed online help.
+  o Support for new FLAC 1.1 command line syntax (metaflac really)
+  o Creates a file called ffp.txt in the output directory with the
+    FLAC fingerprints for all files it has converted or tagged.
+  o Renames .md5 files to .md5.orig
+  o Automatically adds ReplayGain tags to FLAC files
+  o Handles missing/unparseable info file gracefully
 
-* Uses Perl's powerful Makefile.PL.  Simple installation (perl
-  Makefile.PL; make; make install), better checking of dependencies,
-  and numerous options for power users.  Debian packages also
-  available.
+* The "shn2mp3" script will apply ReplayGain tags when extracting FLAC
+  files, so resulting MP3s are normalized to 0db.
 
-* Portable.  Runs on Linux, Windows (Cygwin), MacOS X, *BSD, and
-  anywhere else Perl and the lossless encoders (shorten, flac) have
-  been ported.
+* Fixed a bug in the "cdfill" script where it could delete your
+  original files.
 
-Dist File: http://bklyn.org/~cae/etree-scripts-2.0.tar.gz
-	   http://etree.org/software/etree-scripts-2.0.tar.gz
+* Scripts detect when running under ActiveState and abort.  Sorry, but
+  AS Perl is too broken to work with these scripts.  Use Cygwin.
+
+Dist File: http://bklyn.org/~cae/etree-scripts-3.0.tar.gz	 (*NIX)
+	   http://bklyn.org/~cae/etree-scripts-3.0.cygwin.tar.gz (Cygwin)
 
 Home Page: http://sf.net/projects/etree-scripts/
 
