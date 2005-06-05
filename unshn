@@ -25,6 +25,7 @@ my $shnlen = 1;
 my $shnfix = 0;
 my $rmfixed = 1;
 (my $version = '$Revision$') =~ s/(^.Revision:\s+|\s+\$)//g;
+my $debug = 0;
 
 sub usage {
    print <<EOF;
@@ -42,6 +43,7 @@ Options:
                   is the default.  Use --nolen to disable.
   -k | --keep     When running in --fix mode, do not remove any files which
                   have fixed versions.
+  --debug         Enable debugging output.
 EOF
 }
 
@@ -51,7 +53,8 @@ my $retval = GetOptions ("h|help!" => sub { usage; exit (0); },
 			       exit (0); },
 			 "fix!" => \$shnfix,
 			 "len!" => \$shnlen,
-			 "keep!" => sub { $rmfixed = 0; });
+			 "keep!" => sub { $rmfixed = 0; },
+			 "debug!" => \$debug);
 
 if ($retval != 1) { usage(); exit (1); }
 
@@ -59,10 +62,10 @@ eval "use Audio::Wav";
 my $have_audio_wav = not $@;
 
 # The file types we support, by extension
-my %DECODERS = ( "shn" => 'shorten -x @@FILE@@ @@WAVFILE@@',
-		 "flac" => 'flac --silent -d -o @@WAVFILE@@ @@FILE@@',
-		 "mp3" => 'mpg123 -q -w @@WAVFILE@@ @@FILE@@',
-		 "ogg" => 'oggdec -o @@WAVFILE@@ @@FILE@@');
+my %DECODERS = ( "shn" => [ 'shorten', '-x' ],
+		 "flac" => [ 'flac', '--silent', '-d', '-o' ],
+		 "mp3" => [ 'mpg123', '-q', '-w' ],
+		 "ogg" => [ 'oggdec', '-o' ] );
 
 # seconds_to_mmssff - convert a number of seconds to a string of the
 # format MM:SS.FF
@@ -133,15 +136,22 @@ foreach my $file (sort keys %FILES) {
    $basename =~ s/\.$ext$//i;
    my $wavfile = "$basename.wav";
 
-   my $command = $DECODERS{$ext};
+   my @CMD = @{$DECODERS{$ext}};
 
-   $command =~ s/\@\@FILE\@\@/\Q$file\E/g;
-   $command =~ s/\@\@WAVFILE\@\@/\Q$wavfile\E/g;
+   # Translate fully-qualified filename to Windows format for FLAC
+   if ($^O eq "cygwin") {
+      $file = `cygpath -m $file`;
+      chomp $file;
+   }
+
+   push (@CMD, $wavfile, $file);
 
    print sprintf ("File %2d of %2d: ", ++$index, $numfiles) .
      basename ($file) . ": ";
 
-   my $retval = system ($command);
+   print "RUNNING: @CMD\n" if $debug;
+
+   my $retval = system (@CMD);
 
    if ($retval == 0 and -s $wavfile) {
       print "OK";
