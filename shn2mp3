@@ -385,6 +385,13 @@ sub lossless_to_lossy {
       $quality = $output_type eq "mp3" ? 2 : 7;
    }
 
+   if ($^O eq "cygwin") {
+      $file = `cygpath -m $file`;
+      $outfile = `cygpath -m $outfile`;
+      chomp $file;
+      chomp $outfile;
+   }
+
    $decoder =~ s/%FILE%/\Q$file\E/g;
    $encoder =~ s/%QUALITY%/$quality/g;
    $encoder =~ s/%BITRATE%/$bitrate/g if defined $bitrate;
