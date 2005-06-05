@@ -345,7 +345,8 @@ sub convert_files {
    }
 
    # Rename the directory to have a .flac16 extension
-   (my $newdir = $dir) =~ s/\.(wav|shn|flac\d*)f?$/.flac16/ig;
+   (my $newdir = $dir) =~ s/\.(wav|shn|flac\d*)f?$//ig;
+   $newdir .= ".flac16";
 
    if (not $dryrun and $newdir ne $dir) {
       print "Renaming $dir -> $newdir\n";
