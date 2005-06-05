@@ -1,4 +1,39 @@
+2005-06-03  Caleb Epstein  <cae at bklyn dot org>
+
+	* debian/changelog, INSTALL, README: Updates for version 3.0
+
+	* META.yml: This is a generated file
+
+	* Etree/InfoFile.pm:
+	Parsing improvements for un-numbered tracklists.  Flacify needs Index
+	in the song list.
+
+	* Makefile.PL, flacify, shn2mp3:
+	More fixes for new parsing and Cygwin support
+
+	* shn2mp3: Fixes for updated InfoFile module
+
+	* shn2mp3: Use flac args --totally-silent and
+	--apply-replaygain-which-is-not-lossless (yes, thats a real argument).
+
+	* Etree/InfoFile.pm, flacify: Major parsing improvements (I think).
+
+	* cdfill:
+	Use a two-phase rename to fix a bug where original files could be lost
+
+2004-11-11  Caleb Epstein  <cae at bklyn dot org>
+
+	* Etree/InfoFile.pm: Some improvements when no song names can be found.
+
+2004-09-09  Caleb Epstein  <cae at bklyn dot org>
+
+	* debian/compat: *** empty log message ***
+
 2004-09-02  Caleb Epstein  <cae at bklyn dot org>
+
+	* debian/changelog: Version 2.3
+
+	* ChangeLog: *** empty log message ***
 
 	* Makefile.PL: Version 2.3
 
@@ -20,10 +55,6 @@
 2004-04-20  Caleb Epstein  <cae at bklyn dot org>
 
 	* debian/changelog, ChangeLog, Makefile.PL: Release 2.2 (bugfix)
-
-2004-04-20  Caleb Epstein  <cae at bklyn dot org>
-
-	* Makefile.PL, debian/changelog: Release 2.2 (bugfix)
 
 2004-04-19  Caleb Epstein  <cae at bklyn dot org>
 
