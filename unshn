@@ -62,10 +62,11 @@ eval "use Audio::Wav";
 my $have_audio_wav = not $@;
 
 # The file types we support, by extension
-my %DECODERS = ( "shn" => [ 'shorten', '-x' ],
-		 "flac" => [ 'flac', '--silent', '-d', '-o' ],
-		 "mp3" => [ 'mpg123', '-q', '-w' ],
-		 "ogg" => [ 'oggdec', '-o' ] );
+my %DECODERS = ( "shn" => [ 'shorten', '-x', '_file_', '_wav_' ],
+		 "flac" => [ 'flac', '--silent', '-d', '-o',
+			     '_wav_', '_file_' ],
+		 "mp3" => [ 'mpg123', '-q', '-w', '_wav_', '_file_' ],
+		 "ogg" => [ 'oggdec', '-o', '_wav_', '_file_' ] );
 
 # seconds_to_mmssff - convert a number of seconds to a string of the
 # format MM:SS.FF
@@ -144,7 +145,7 @@ foreach my $file (sort keys %FILES) {
       chomp $file;
    }
 
-   push (@CMD, $wavfile, $file);
+   @CMD = map { s/^(_wav_)$/$wavfile/; s/^(_file_)$/$file/; $_; } @CMD;
 
    print sprintf ("File %2d of %2d: ", ++$index, $numfiles) .
      basename ($file) . ": ";
