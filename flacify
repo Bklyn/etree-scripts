@@ -16,7 +16,8 @@ use File::Copy;
 use Data::Dumper;
 use File::Spec;
 use Cwd;
-use Carp;
+use POSIX qw(strftime);
+use Text::Wrap;
 
 my $progname = basename $0;
 my $rcsid = q$Id$;
@@ -25,6 +26,7 @@ my $debug = 0;
 my $dryrun = 0;
 my $tagdiscs = 0;
 my $replay_gain = 1;
+my $logfile;
 
 my %EXES = ("unshn" => undef,
 	    "flac" => undef,
@@ -55,16 +57,38 @@ foreach my $exe (keys %EXES) {
      or die "Can't find the required program `$exe' in your PATH\n";
 }
 
-# Line buffering
-$| = 1;
-
 GetOptions ("debug!" => \$debug,
 	    "discs!" => \$tagdiscs,
 	    "dry-run!" => \$dryrun,
 	    "help!" => sub { exit system ("perldoc", $0) },
 	    "version!" => sub { version (); exit (0) },
 	    "replay-gain!" => \$replay_gain,
-	    "tag=s%" => \%TAGFORMAT);
+	    "tag=s%" => \%TAGFORMAT,
+	    "log=s" => \$logfile);
+
+if (defined $logfile) {
+   open (STDOUT, ">> $logfile")
+     or die "$progname: can't send output to $logfile: $!\n";
+   open (STDERR, ">& STDOUT")
+     or die "$progname: can't send errors to $logfile: $!\n";
+
+   select STDERR; $| = 1;
+   select STDOUT; $| = 1;
+}
+
+sub logmsg {
+   my $prio = "INFO";
+
+   if ($_[0] =~ m/^(warn|debug|error|info|dryrun)$/i) {
+      $prio = shift @_;
+   }
+
+   $prio = uc $prio;
+
+   return if $prio eq "DEBUG" and not $debug;
+
+   print strftime ("%b %d %H:%M:%S: $prio: ", localtime), "@_\n";
+}
 
 # version - print version info
 sub version {
@@ -128,9 +152,9 @@ sub run_command {
    $COMMAND[0] = $EXES{$COMMAND[0]};
 
    if ($dryrun) {
-      print "DRYRUN: " . join (" ",
-			       map { $_ =~ m/[\s[:punct:]]/ ? "'$_'" : $_ }
-			       @COMMAND) . "\n";
+      logmsg ("DRYRUN", join (" ",
+			      map { $_ =~ m/[\s[:punct:]]/ ? "'$_'" : $_ }
+			      @COMMAND));
       return 0;
    }
 
@@ -164,14 +188,31 @@ sub convert_files {
    my @SHNS = grep { /\.shn$/i } @$files;
 
    if (scalar @SHNS) {
-      print "Extracting SHN to WAV\n";
+      # Ensure filenames are unique because we will flatten the dirs
+      my @DUPS;
+      my %UNIQ;
+
+      foreach my $file (@SHNS) {
+	 my $base = basename $file;
+	 if (exists $UNIQ{$base}) {
+	    push (@DUPS, $file);
+	 }
+	 $UNIQ{$base}++;
+      }
+
+      if (scalar @DUPS) {
+	 die "One or more filenames are not unique:\n" .
+	   join ("\n\t", @DUPS) . "\n";
+      }
+
+      logmsg ("Extracting SHN to WAV");
 
       my $status = run_command ("unshn", @SHNS);
 
       die "Error unpacking SHN files\n" unless $status == 0 or $status == 2;
    }
 
-   print "SHN files: @SHNS\n" if $debug;
+   logmsg ("DEBUG", "SHN files:\n\t" . join ("\n\t", @SHNS));
 
    # 2. WAV -> FLAC
    my @WAVS = map {
@@ -184,10 +225,10 @@ sub convert_files {
    # Also add in any WAV files from the start
    push (@WAVS, grep { /\.wav$/i } @$files);
 
-   print "WAV files: @WAVS\n" if $debug;
+   logmsg ("DEBUG", "WAV files:\n\t" . join ("\n\t", @WAVS));
 
    if (scalar @WAVS) {
-      print "Converting WAV files to FLAC\n";
+      logmsg ("Converting WAV files to FLAC");
 
       # In order to do proper CD sector alignment, we want to group files
       # by set
@@ -201,7 +242,7 @@ sub convert_files {
 
       # If we dopn't have any set info, group files by disc instead
       if (scalar keys %GROUPS <= 1 and exists $GROUPS{0}) {
-	 print "No set information.  Grouping by disc.\n";
+	 logmsg ("No set information.  Grouping by disc.");
 	 undef %GROUPS;
 	 $groupby = "Disc";
 	 foreach my $disc (1 .. $info->num_discs) {
@@ -215,7 +256,7 @@ sub convert_files {
 	 map { $GROUPS{1}{$_} = undef; } 0 .. $#$files;
       }
 
-      print "Groups (by $groupby):\n", Dumper (\%GROUPS) if $debug;
+      logmsg ("DEBUG", "Groups (by $groupby):\n", Dumper (\%GROUPS));
 
       # Reverse the mapping from group -> files to file -> group
       my %INDEX_GROUP;
@@ -227,22 +268,22 @@ sub convert_files {
 	 map { $INDEX_GROUP{$_} = $group } @BATCH;
       }
 
-      print "Index groups:\n", Dumper (\%INDEX_GROUP) if $debug;
+      logmsg ("DEBUG", "Index groups:\n", Dumper (\%INDEX_GROUP));
 
       foreach my $group (sort setlist_order keys (%GROUPS)) {
 	 my @BATCH = sort numeric keys %{$GROUPS{$group}};
 
-	 print "Batch $group: @BATCH\n" if $debug;
+	 logmsg ("DEBUG", "Batch $group: @BATCH");
 
 	 my @FILES = map { $WAVS[$_] } grep { $_ <= $#WAVS } @BATCH;
 
-	 print "Files for batch $group: @FILES\n" if $debug;
+	 logmsg ("DEBUG", "Files for batch $group: @FILES");
 
 	 next unless scalar @FILES;
 
-	 print "Converting $groupby $group from WAV to FLAC, ",
-	   scalar (@FILES), " files:\n\t",
-	     join ("\n\t", map { basename $_ } @FILES), "\n\n";
+	 logmsg ("Converting $groupby $group from WAV to FLAC, " .
+		 scalar (@FILES) . " files:\n\t" .
+		 join ("\n\t", map { basename $_ } @FILES));
 
 	 # Compress the WAV files to FLAC files, deleting as we go.
 	 # Ensure CD sector alignment
@@ -262,6 +303,8 @@ sub convert_files {
 	    }
 	    die "Error encoding FLAC files\n";
 	 }
+
+	 logmsg ("$groupby $group encoding complete\n");
       }
    }
 
@@ -281,7 +324,9 @@ sub convert_files {
      "number of songs (" . scalar (@$songs) . ")\n"
        unless scalar @FLACS == scalar @$songs;
 
-   print "Tagging files:\n";
+   logmsg ("DEBUG", "FLAC files:\n\t", join ("\n\t", @FLACS));
+
+   logmsg ("Tagging files\n");
 
    tag_files ($info, $songs, \@FLACS) or die "Error tagging files\n";
 
@@ -291,7 +336,7 @@ sub convert_files {
       replay_gain (@FLACS) or die "Error calculating ReplayGain\n";
    }
 
-   print "Removing original SHN files\n" if scalar @SHNS;
+   logmsg ("Removing original SHN files") if scalar @SHNS;
 
    my $howmany = ($dryrun ? scalar (@SHNS) : unlink (@SHNS));
 
@@ -302,9 +347,9 @@ sub convert_files {
 
    # Create FLAC fingerprint file
    if (not $dryrun and not -e "$dir/ffp.txt") {
-      print "Creating ffp.txt\n";
+      logmsg ("Creating FLAC fingerprint file ffp.txt");
 
-      open (METAFLAC, "$EXES{metaflac} --show-md5sum " .
+      open (METAFLAC, "$EXES{metaflac} --show-md5sum --with-filename " .
 	    join (" ", map { quotemeta $_ } @FLACS) . "|")
 	or die "Unable to open pipe from metaflac: $!\n";
 
@@ -325,11 +370,11 @@ sub convert_files {
    my @MD5S = $info->files ("md5");
 
    if (scalar @MD5S) {
-      print "Renaming MD5 files:\n";
+      logmsg ("Renaming MD5 files:");
 
       foreach my $file (@MD5S) {
 	 (my $newname = $dir . "/" . basename ($file)) =~ s/$/.orig/;
-	 print "\t$file -> $newname\n";
+	 logmsg ("\t$file -> $newname");
 	 if (not $dryrun) {
 	    rename ($file, $newname)
 	      or die "Rename failed: $!\n";
@@ -339,7 +384,7 @@ sub convert_files {
 
    # Remove empty subdirs
    if (not $dryrun) {
-      print "Removing empty subdirs\n";
+      logmsg ("Removing empty subdirectories\n");
       local $File::Find::dont_use_nlink = 1;
       finddepth (sub { rmdir if -d }, $dir);
    }
@@ -349,12 +394,12 @@ sub convert_files {
    $newdir .= ".flac16";
 
    if (not $dryrun and $newdir ne $dir) {
-      print "Renaming $dir -> $newdir\n";
+      logmsg ("Renaming $dir -> $newdir\n");
       chdir ("..") or die "Unable to chdir: $!\n";
       rename ($dir, $newdir) or die "Rename failed: $!\n";
    }
 
-   print "\nDone processing $dir\n\n";
+   logmsg ("Done processing $dir\n");
 
    1;
 }
@@ -395,6 +440,11 @@ sub tag_files {
       }
 
       $VALUES{"TITLE"} = $song->{Title} if defined $song and $song->{Title};
+
+      # Mark song as having a segue
+      if (exists $song->{Segue}) {
+	 $VALUES{"TITLE"} .= " >";
+      }
 
       my $note;
       $note = $song->{Notes} if defined $song and exists $song->{Notes};
@@ -440,6 +490,8 @@ sub tag_files {
       }
    }
 
+   print "\n";
+
    1;
 }
 
@@ -465,7 +517,7 @@ sub replay_gain {
 
    return 1 unless $need;
 
-   print "Adding ReplayGain information to FLACs (this may take a while)\n";
+   logmsg ("Adding ReplayGain information to FLACs (this may take a while)");
 
    my @CMD = ("metaflac", "--add-replay-gain", @FILES);
 
@@ -475,6 +527,8 @@ sub replay_gain {
       warn "Error adding ReplayGain tags to FLAC files\n";
       return 0;
    }
+
+   logmsg ("Done with ReplayGain\n");
 
    return 1;
 }
@@ -493,52 +547,189 @@ foreach my $dir (map { File::Spec->rel2abs ($_) } @ARGV) {
 
    $info->parse;
 
-   print "Processing directory $dir:\n\n";
+   print "=" x 79 . "\n";
 
-   print "Etree::InfoFile dump:\n" . Dumper ($info) if $debug;
+   logmsg ("Processing directory $dir\n");
 
-   print "Artist: ", $info->artist || "Unknown", "\n",
-     "  Date: ", $info->date || "Unknown", "\n",
-       " Venue: ", $info->venue || "Unknown", "\n",
-	 "Source: ", $info->source || "Unknown", "\n",
-	   "\n";
+   logmsg ("DEBUG", "Etree::InfoFile dump:\n" . Dumper ($info));
+
+   # Wrap long lines nicely
+   sub linewrap {
+      local ($Text::Wrap::columns) = 65;
+      Text::Wrap::wrap ('', '        ', shift);
+   }
+
+   print
+     "   Dir: ", linewrap ($dir), "\n",
+     "Artist: ", linewrap ($info->artist || "Unknown"), "\n",
+     "  Date: ", linewrap ($info->date || "Unknown"), "\n",
+     " Venue: ", linewrap ($info->venue || "Unknown"), "\n",
+     "Source: ", linewrap ($info->source || "Unknown"), "\n",
+     "\n";
 
    # Get the list of all possible audio files we will convert
    my @FILES = sort { $a cmp $b } $info->files ("flac"),
      $info->files ("wav"), $info->files ("shn");
 
    if (not scalar @FILES) {
-      print "No appropriate audio files found\n";
+      logmsg ("WARN", "No appropriate audio files found.  Skipping $dir");
       next;
    }
 
    my @SONGS = $info->songs;
 
    if (scalar @SONGS and scalar @SONGS < scalar @FILES) {
-      print "Number of songs from info file (" . scalar (@SONGS) .
-	") doesn't match number of audio files (" . scalar (@FILES) . "):\n";
-      print "Songs: ", join (", ", map { $_->{Title} } @SONGS), "\n",
-	"Files: ", join (", ", map { basename $_ } @FILES), "\n";
+      logmsg ("WARN", "Number of songs from info file (" . scalar (@SONGS) .
+	      ") doesn't match number of audio files (" . scalar (@FILES) 
+	      . "):\n");
+      logmsg ("WARN", "Songs:\n\t", join ("\n\t", map { $_->{Title} } @SONGS),
+	      "\nFiles:\n\t", join ("\n\t", map { basename $_ } @FILES), "\n");
       next;
    }
-
-   print "Songs:\n", Dumper (\@SONGS) if $debug;
 
    # Truncate the song list to match the file list
    $#SONGS = $#FILES;
 
    convert_files ($info, \@SONGS, \@FILES) or die "Error converting files\n";
+
+   print "=" x 79 . "\n";
 }
 
 __END__
 
 =head1 NAME
 
-flacify - Convert audio files to FLAC files with Vorbis comments
+flacify - Create tagged FLAC files
 
 =head1 SYNOPSIS
 
-flacify [options] directory [directory ...]
+flacify [OPTIONS] DIRECTORY [DIRECTORY ...]
+
+=head1 DESCRIPTION
+
+The purpose of L<flacify> is to convert audio files from WAVE, Shorten
+or FLAC format into losslessly-compressed, properly tagged FLAC files.
+L<flacify> will convert existing Shorten or WAV audio files to FLAC
+format, and add or update tags on existing FLAC files.
+
+The script is geared towards handling live concert recordings arranged
+according to the standards of L<http://etree.org/>.  The audio files
+should be accompanied by a text file that provides detailed
+information about the artist, date, venue, recording source, and track
+list of the performance.
+
+For each directory the user specifies, L<flacify> performs the
+following steps:
+
+=over
+
+=item B<Parsing>
+
+The directory is processed by the the L<Etree::InfoFile> module, which
+searches for audio and text files in the directory.  Text files are
+parsed for the artist name, venue, date, song titles, recording
+source, and other information.  This information will be used in the
+tagging process.
+
+If no text files can be found, an error is emitted and the directory is
+not processed.
+
+If the input files are already FLAC files, we skip ahead to the
+L<"Tagging"> step.
+
+=item B<Decompression>
+
+Here we uncompress all SHN files to WAV files using the L<unshn>
+script, also from the etree-scripts distribution.  If the input
+consists of only WAV files, this step is skipped.
+
+=item B<Compression>
+
+Any WAV files resulting from the previous step are then compressed
+using the command line L<flac> encoder.  The following options are
+passed to L<flac>: C<--sector-align --delete-input-file --replay-gain>
+The C<--reply-gain> option is omitted if the user passes the
+--noreplay-gain argument to flacify.
+
+=item B<Tagging>
+
+We are now left with only FLAC files.  These are tagged with the
+information from the L<"Parsing"> step.  The tagging uses these fields
+as specified by L<http://www.xiph.org/ogg/vorbis/doc/v-comment.html>:
+
+=over
+
+=item ARTIST
+
+The performer.  Usually taken from the first line of the info file.
+
+=item ALBUM
+
+The date of the performance in YYYY-MM-DD format followed by the venue
+information (e.g. "2003-01-01 Lupo's Hearbreak Hotel - Providence,
+RI")
+
+=item DATE
+
+The year of the performance in YYYY format.
+
+=item LOCATION
+
+The venue where the performance took place.
+
+=item SOURCEMEDIA
+
+The recording source information, if this was found.  Usually contains
+microphone, A/D converter, and recorder information.
+
+=item DISCNUMBER
+
+When run with B<--discs>, this tag will be set for each file.
+Otherwise it will not be set.
+
+=item TRACKNUMBER
+
+Tracks are numbered 1..n on either a per-disc basis or for the entire
+file set.  If the B<--discs> option is specified, TRACKNUMBER will
+correspond to the index of the track within the current disc.  By
+default the TRACKNUMBER will be the index of the track within the
+entire fileset.
+
+=item TITLE
+
+The title of the song.
+
+=item COMMENT
+
+If there are any notes found for a given song, they will be included
+in this tag.
+
+=back
+
+=item B<FFP Creation>
+
+If no file named C<ffp.txt> exists in the new directory, one will be
+created.  It will contain the output of C<metaflac --show-md5sum
+*.flac>.
+
+=item B<MD5 Renaming>
+
+Any existing files in the source directory whose names end in C<.md5>
+will be moved to the top level directory and renamed so they end in
+C<.md5.orig>.
+
+=item B<Directory Pruning>
+
+Any subdirectories left empty after the processing above will be
+removed.
+
+=item B<Directory Renaming>
+
+Finally, the directory is renamed to end in ".flac16".  If the
+directory name previously ended in ".shn" or ".shnf", that suffix is
+removed.
+
+=back
 
 =head1 OPTIONS
 
@@ -588,112 +779,9 @@ all files by --tag MYTAG=MYVALUE.
 See the section on L<Tagging> below for a list of all the standard
 tags which are used by flacify.
 
-=back
+=item B<--log> filename
 
-=head1 DESCRIPTION
-
-The purpose of L<flacify> is to convert audio files from WAVE, Shorten
-or FLAC format into losslessly-compressed, B<tagged> FLAC files.  The
-code is geared towards processing live concert recordings arranged
-according to the standards of L<http://etree.org/>.  The audio files
-should be accompanied by a text file which provides detailed
-information about the artist, date, venue and track list of the
-recording.
-
-For each directory the user specifies, L<flacify> performs the
-following steps:
-
-=over
-
-=item Parsing
-
-The directory is processed by the the L<Etree::InfoFile> module, which
-searches for audio files and text files in the directory.  Text files
-are parsed for the artist name, venue, date, song titles, recording
-source, and other information.  These will be used in the tagging
-process.
-
-If no text files can be found, an error is emitted and the directory is
-not processed.
-
-If the input files are already FLAC files, we skip ahead to the
-L<"Tagging"> step.
-
-=item Decompression
-
-Uncompressing any SHN files to WAV files using the L<unshn> script,
-also from the etree-script distribution.  If the input consists of
-only WAV files, this step is skipped.  FLAC files are not
-decompressed either.
-
-At the end of this step we are left will only WAV files.
-
-=item Compression
-
-Any WAV files resulting from the previous step are then compressed
-using the command line L<flac> encoder.  The following options are
-passed to L<flac>: C<--sector-align --delete-input-file --replay-gain>
-The C<--reply-gain> option is omitted if the user passes the
---noreplay-gain argument to flacify.
-
-=item Tagging
-
-We are now left with all FLAC files.  These are tagged with the
-information from the L<"Parsing"> step.  The tagging uses these fields
-as specified by L<http://www.xiph.org/ogg/vorbis/doc/v-comment.html>:
-
-=over
-
-=item ARTIST
-
-The performer.  Usually taken from the first line of the info file.
-
-=item ALBUM
-
-The date of the performance in YYYY-MM-DD format followed by the venue
-information (e.g. "2003-01-01 Lupo's Hearbreak Hotel - Providence,
-RI")
-
-=item DATE
-
-The year of the performance in YYYY format.
-
-=item LOCATION
-
-The venue where the performance happened.
-
-=item SOURCEMEDIA
-
-The recording source information, if this was found.  Usually contains
-microphone, A/D converter, and recorder information.
-
-=item DISCNUMBER
-
-When run with B<--discs>, this tag will be set for each file.
-Otherwise it will not be set.
-
-=item TRACKNUMBER
-
-The number of each track in the set.  When run with B<--discs>, the
-TRACKNUMBER will be the number of the track within its disc, otherwise
-it will be the number of the track in the entire set.
-
-=item TITLE
-
-The name of the song.
-
-=item COMMENT
-
-If there are any notes found for a given song, they will be included
-in this tag.
-
-=back
-
-=item Directory Renaming
-
-Finally, the directory is renamed to end in ".flac16".  If the
-directory name previously ended in ".shn" or ".shnf", that suffix is
-removed.
+Redirect all output messages to this file.  Helpful for debugging.
 
 =back
 
