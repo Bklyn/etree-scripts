@@ -25,6 +25,9 @@ use IO::Handle;
 use Text::ParseWords;
 use lib dirname $0;
 use Etree::InfoFile;
+use Text::Wrap;
+
+$Text::Wrap::break = qr/[\s\>]/;
 
 eval "use Date::Parse";
 my $have_date_parse = not $@;
@@ -44,7 +47,6 @@ my $preset;
 my $altpreset = "standard";
 my $target = File::Spec->rel2abs (".");
 my $test = 0;
-my %OUTPUT;
 my $rcfile = "$ENV{HOME}/.${progname}rc";
 my $output_type = ($progname =~ /(ogg|mp3)$/ ? $1 : "mp3");
 
@@ -61,41 +63,14 @@ if ($^O eq "MSWin32") {		# Active State
      if -d '/c/Program Files/FLAC';
 }
 
-format STDOUT_TOP =
-+-----------------------------------------------------------------------------+
-|   Directory: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
-$OUTPUT{"Directory"}
-|   Info File: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
-$OUTPUT{"InfoFile"}
-| Destination: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
-$OUTPUT{"Destination"}
-|        Band: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
-$OUTPUT{"Band"} || "Unknown"
-|        Date: @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
-$OUTPUT{"Date"} || "Unknown"
-|       Venue: ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
-$OUTPUT{"Venue"}
-| ~            ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
-$OUTPUT{"Venue"}
-| ~            ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
-$OUTPUT{"Venue"}
-|      Source: ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
-$OUTPUT{"Source"}
-| ~            ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
-$OUTPUT{"Source"}
-| ~            ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
-$OUTPUT{"Source"}
-| ~            ^<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< |
-$OUTPUT{"Source"}
-+-----------------------------------------------------------------------------+
- Track  Time  Title / Comments
-------- ----- ----------------
-.
-
-format STDOUT =
-@>>>>>> @>>>> @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-@OUTPUT{"Track", "Time", "Title"}
-.
+# Wrap long lines nicely
+sub linewrap {
+   local ($Text::Wrap::columns) = 65;
+   my $text = shift;
+   my $initial = shift || "";
+   my $subsequent = shift || " " x 12;
+   Text::Wrap::wrap ($initial, $subsequent, $text);
+}
 
 # Types of audio files we recognize, by extension
 my @AUDIOEXT = ("shn", "mp3", "ogg", "flac");
@@ -122,7 +97,7 @@ sub shnlen {
    open (SHNINFO, "shntool info \Q$file\E 2>/dev/null |") or return;
 
    while (<SHNINFO>) {
-      if (/^length:\s+([\d\.:]+)/) {
+      if (/^length:\s+([\d:]+)/) {
 	 $length = $1;
 	 last;
       }
@@ -413,17 +388,8 @@ sub lossless_to_lossy {
 
    my $skip = (-f $outfile and -M $outfile < -M $file and not $force);
 
-   @OUTPUT{"Destination", "Disc", "Track", "Time", "Title"} =
-     ($outputdir, $disc, $track, $tracktime, $title);
-   $OUTPUT{"Disc"} = "$disc/$info->{Discs}"
-     if defined $info->{"Discs"} and $info->{"Discs"} > 1;
-   $OUTPUT{"Track"} = "$track/$info->{Disc}{$disc}{Tracks}"
-     if exists $info->{Disc} and exists $info->{Disc}{$disc};
-   $OUTPUT{"Track"} = $n_of_m;
-   $OUTPUT{"Time"} =~ s/\.\d+$//;
-   $OUTPUT{"Venue"} ||= "Unknown";
-
-   write;
+   print sprintf ("%7.7s %5.5s ", $n_of_m, $tracktime) .
+     linewrap ($title, "", " " x 14) . "\n";
 
    print "Command line: $cmd\n" if $debug or $test;
 
@@ -452,19 +418,18 @@ sub lossless_to_lossy {
       my $finish = time;
       my $encodetime = $finish - $start;
 
-      @OUTPUT{"Disc", "Track", "Time"} =
-	("", "", $encodetime ? fmttime ($encodetime) : "");
+      print " " x 14;
       if ($tracksecs and $encodetime) {
-	 $OUTPUT{"Title"} = "Encode speed " .
+	 print "Encode speed " .
 	   sprintf ("%.1fx", $tracksecs / $encodetime);
       } else {
-	 $OUTPUT{"Title"} = "File size " . bytes_to_human (-s $outfile);
+	 print "File size " . bytes_to_human (-s $outfile);
 	 if ($skip) {
-	    $OUTPUT{"Title"} .= ", created " .
+	    print ", created " .
 	      strftime ("%m/%d/%y %H:%M", localtime ((stat $outfile)[10]));
 	 }
       }
-      write;
+      print "\n";
    }
 
    1;
@@ -476,7 +441,8 @@ foreach my $dir (map { File::Spec->rel2abs ($_) } @ARGV) {
       next;
    }
 
-   my $info = new Etree::InfoFile (Directory => $dir) or die;
+   my $info = new Etree::InfoFile (Directory => $dir,
+				   Debug => $debug) or die;
 
    $info->parse;
 
@@ -484,14 +450,23 @@ foreach my $dir (map { File::Spec->rel2abs ($_) } @ARGV) {
 
    print "Etree::InfoFile dump:\n", Dumper ($info), "\n" if $debug;
 
-   %OUTPUT = %$info;
-   $OUTPUT{"Date"} = $info->date || "Unknown";
-   $OUTPUT{"Venue"} = $info->venue || "Unknown";
-   $OUTPUT{"Source"} = $info->source || "Unknown";
+   my $source = $info->source || "Unknown";
 
-   $^L = "\n";
-   STDOUT->format_lines_left (0);
-   STDOUT->format_lines_per_page (99999);
+   if (length $source > 256) {
+      $source = substr ($source, 0, 256) . " ...";
+   }
+
+   print
+     "=" x 79 . "\n" .
+     " Directory: $dir\n" .
+     " Info File: $info->{InfoFile}\n" .
+     "Output Dir: " . outputdir ($dir) . "\n" .
+     "      Band: " . ($info->{Band} || "Unknown") . "\n" .
+     "      Date: " . linewrap ($info->date || "Unknown") . "\n" .
+     "     Venue: " . linewrap ($info->venue || "Unknown") . "\n" .
+     "    Source: " . linewrap ($source) . "\n\n" .
+     " Track  Time  Title / Comments\n" .
+     "------- ----- ----------------\n";
 
    # Copy the info file
    if (not $test and exists $info->{"InfoFile"}) {
@@ -517,6 +492,8 @@ foreach my $dir (map { File::Spec->rel2abs ($_) } @ARGV) {
       lossless_to_lossy ($info, $FILES[$index], $song, $index)
 	or die "Error converting $FILES[$index] to $output_type\n";
    }
+
+   print "\n" . "=" x 79 . "\n";
 }
 
 __END__
