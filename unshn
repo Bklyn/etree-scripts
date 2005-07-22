@@ -141,7 +141,7 @@ foreach my $file (sort keys %FILES) {
 
    # Translate fully-qualified filename to Windows format for FLAC
    if ($^O eq "cygwin") {
-      $file = `cygpath -m $file`;
+      $file = `cygpath -m \Q$file\E`;
       chomp $file;
    }
 

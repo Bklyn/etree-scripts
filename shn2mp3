@@ -361,8 +361,8 @@ sub lossless_to_lossy {
    }
 
    if ($^O eq "cygwin") {
-      $file = `cygpath -m $file`;
-      $outfile = `cygpath -m $outfile`;
+      $file = `cygpath -m \Q$file\E`;
+      $outfile = `cygpath -m \Q$outfile\E`;
       chomp $file;
       chomp $outfile;
    }
