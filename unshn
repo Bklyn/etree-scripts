@@ -147,10 +147,10 @@ foreach my $file (sort keys %FILES) {
 
    @CMD = map { s/^(_wav_)$/$wavfile/; s/^(_file_)$/$file/; $_; } @CMD;
 
+   print "RUNNING: @CMD\n" if $debug;
+
    print sprintf ("File %2d of %2d: ", ++$index, $numfiles) .
      basename ($file) . ": ";
-
-   print "RUNNING: @CMD\n" if $debug;
 
    my $retval = system (@CMD);
 
