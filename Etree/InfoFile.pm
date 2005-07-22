@@ -39,8 +39,8 @@ my $have_locale = not $@;
 eval "use Date::Parse";
 my $have_date_parse = not $@;
 
-my
-  $VERSION = sprintf "%d.%03d", q$Revision$ =~ /(\d+)/g;
+(my $REV = q$Revision$) =~ s/^Revision:\s+([\d\.]+)\s.*/$1/;
+my $VERSION = sprintf "%d.%03d", $REV =~ /(\d+)/g;
 my $debug = 0;
 my $test = 0;
 
@@ -129,6 +129,7 @@ sub new {
    my $type = shift;
    my %param = @_;
    my $self = bless { %param }, $type;
+   $self->{Version} = $REV;
    $self->{Debug} ||= $debug;
    $self;
 }
@@ -357,7 +358,7 @@ sub parseinfo {
 
    my $state = $self->{state};
 
-   $self->{NumSongs} ||= 0;
+   $self->{NumSongs} ||= $self->files ("shn") + $self->files ("flac");
 
    local $SIG{__WARN__} = sub { confess };
 
@@ -378,7 +379,7 @@ sub parseinfo {
 	 print ">SOURCEINFO<: $para\n" if $self->{Debug};
 	 push (@{$self->{Source}}, $para);
       } elsif ($para =~ /\b(cd|set|dis[ck]|volume|set)\b/i or
-	       $para =~ /^($numrx)/m) {
+	       $para =~ /^($trackre)/m) {
 	 print ">DISCINFO/TRACKINFO<: $para\n" if $self->{Debug};
 	 $self->parsetracks ($para);
       } elsif ($para =~ /^([\*\@\#\$\%\^]+)\s*[-=:]?\s*/) {
@@ -431,31 +432,54 @@ sub parsetracks {
    my $expectracks = 0;
 
    foreach my $line (split /\n/, $para) {
-      if ($line =~ $discrx) {
-	 $st->{discnum} = word2num ($2);
-	 print "\t>DISC $st->{discnum}< $line\n" if $self->{Debug};
-	 $st->{indisc} = $st->{discnum};
-	 $st->{lastsong} = 0;
-	 $expectracks = 1;
-      } elsif ($line =~ /\bset\s*($numrx)\b/i) {
-	 $st->{set} = word2num ($1);
-	 print "\t>SET $st->{set}< $line\n" if $self->{Debug};
-	 $expectracks = 1;
-      } elsif ($line =~ /^encore/i) {
-	 print "\t>SET E< $line\n" if $self->{Debug};
-	 $st->{set} = "E";
-	 $expectracks = 1;
-      } elsif ($line =~ /^($numrx)\s*(cd|dis[ck])s?\b/i) {
-	 print "\t>DISCS< $line\n" if $self->{Debug};
-	 $self->{"Discs"} = word2num ($1);
-	 $expectracks = 1;
-      } elsif (not $st->{haveall} and
-	       (($line =~ $trackre and
-		 (int ($1) == 1 || int ($1) == (1 + $st->{lastsong}))) or
-		$expectracks)) {
-	 my $songnum = defined $1 ? int ($1) :
-	   exists $self->{Songs} ? 1 + scalar (@{$self->{Songs}}) : 1;
-	 my $fulltitle = defined ($2) ? $2 : $line;
+      my $matched = 0;
+
+      if (not $line =~ $trackre) {
+	 if ($line =~ $discrx) {
+	    $st->{discnum} = word2num ($2);
+	    print "\t>DISC $st->{discnum}< $line\n" if $self->{Debug};
+	    $st->{indisc} = $st->{discnum};
+	    $st->{lastsong} = 0;
+	    $expectracks = 1;
+	    $matched = 1;
+	 }
+
+	 if ($line =~ /\bset\s*($numrx)\b/i) {
+	    $st->{set} = word2num ($1);
+	    print "\t>SET $st->{set}< $line\n" if $self->{Debug};
+	    $expectracks = 1;
+	    $matched = 1;
+	 } elsif ($line =~ /^encore/i) {
+	    print "\t>SET E< $line\n" if $self->{Debug};
+	    $st->{set} = "E";
+	    $matched = 1;
+	 }
+
+	 if ($line =~ /^($numrx)\s*(cd|dis[ck])s?\b/i) {
+	    print "\t>DISCS< $line\n" if $self->{Debug};
+	    $self->{"Discs"} = word2num ($1);
+	    $expectracks = 1;
+	    $matched = 1;
+	 }
+
+	 next if $matched;
+      }
+
+      if (not $st->{haveall} and $line =~ $trackre
+	  or $expectracks) {
+	 my ($songnum, $fulltitle);
+
+	 if ($line =~ $trackre and
+	     (int ($1) == 1 || int ($1) == (1 + $st->{lastsong}))) {
+	    $songnum = int ($1);
+	    $fulltitle = $2;
+	 } elsif (exists $self->{Songs}) {
+	    $songnum = 1 + scalar (@{$self->{Songs}});
+	    $fulltitle = $line;
+	 } else {
+	    $songnum = 1;
+	    $fulltitle = $line;
+	 }
 
 	 print "\t>TRACK $songnum< $line\n" if $self->{Debug};
 
@@ -499,8 +523,9 @@ sub parsetracks {
 	    print "Disc $st->{discnum} Song $songnum: " .
 	      "have all needed song names\n" if $self->{Debug};
 	    $st->{haveall} = 1;
+	    $expectracks = 0;
 	 }
-      } elsif ($line =~ /^([\*\@\#\$\%\^]+)\s*[-=:]?\s*(.+)/
+      } elsif ($line =~ /\G([\*\@\#\$\%\^]+)\s*[-=:]?\s*(.+)/gc
 	       and exists $self->{"Notes"}{$1}) {
 	 print "\t>NOTE $1< $line\n" if $self->{Debug};
 	 $self->{"Notes"}{$1} .= $2;
@@ -662,8 +687,10 @@ sub files {
    $self->findfiles unless exists $self->{Files};
 
    if (defined $ext) {
-      return wantarray ? sort keys %{$self->{ByExt}{lc $ext}} :
-	scalar keys %{$self->{ByExt}{lc $ext}};
+      $ext = lc $ext;
+      return wantarray ?
+	sort keys %{$self->{ByExt}{$ext}} :
+	scalar keys %{$self->{ByExt}{$ext}};
    }
    wantarray ? %{$self->{Files}} : scalar keys %{$self->{Files}};
 }
