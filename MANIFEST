@@ -1,21 +1,25 @@
-README
-INSTALL
-MANIFEST
+.cvsignore
 burn-shns
 cdfill
 ChangeLog
+debian/.cvsignore
 debian/changelog
+debian/compat
 debian/control
 debian/copyright
 debian/README.debian
 debian/rules
 Etree/InfoFile.pm
 flacify
+INSTALL
 make-toc
 Makefile.PL
 makehbx
+MANIFEST
 md5check
+META.yml			Module meta-data (added by MakeMaker)
+parseinfo
+README
 shn2mp3
 shn2ogg
 unshn
-META.yml                                 Module meta-data (added by MakeMaker)
