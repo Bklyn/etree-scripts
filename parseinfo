@@ -8,18 +8,21 @@ use File::Basename;
 
 my $debug = 0;
 
+$| = 1;
+
 GetOptions ("debug!" => \$debug);
 
 foreach my $arg (@ARGV) {
    my $info = new Etree::InfoFile (Directory => (-d $arg ? $arg : undef),
-				   InfoFile => (-f $arg ? $arg : undef))
+				   InfoFile => (-f $arg ? $arg : undef),
+				   debug => $debug)
      or die;
    $info->parse;
 
    print Dumper $info if $debug;
 
-   print join (" ", grep defined,
-	       $info->artist, $info->date, $info->venue), ": ";
+   print join ("\n", grep defined,
+	       $info->artist, $info->date, $info->venue), "\n\n";
 
    my @SONGS = $info->songs;
    my $lastset = "";
