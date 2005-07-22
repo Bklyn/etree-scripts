@@ -3,12 +3,19 @@
  / _ \ __| '__/ _ \/ _ \_____/ __|/ __| '__| | '_ \| __/ __|
 |  __/ |_| | |  __/  __/_____\__ \ (__| |  | | |_) | |_\__ \
  \___|\__|_|  \___|\___|     |___/\___|_|  |_| .__/ \__|___/
-                                             |_| V3.0
+                                             |_| V3.1
 
-Announcing release 3.0 of etree-scripts, a set of (mostly) Perl
+Announcing release 3.1 of etree-scripts, a set of (mostly) Perl
 scripts for lossless audio freaks who get busy on the command line.
 
-Some important changes in this long overdue release:
+This is a bug-fix release for version 3.0:
+
+* Fixed bug in unshn where it reversed the arguments to the shorten
+  command.
+
+* Timestamp messages from flacify and shn2mp3.
+
+Some important changes in version 3.0:
 
 * Revamped parsing code.  The parser breaks up the info file first by
   paragraphs and identifies their content broadly before splitting and
@@ -39,8 +46,8 @@ Some important changes in this long overdue release:
 * Scripts detect when running under ActiveState and abort.  Sorry, but
   AS Perl is too broken to work with these scripts.  Use Cygwin.
 
-Dist File: http://bklyn.org/~cae/etree-scripts-3.0.tar.gz	 (*NIX)
-	   http://bklyn.org/~cae/etree-scripts-3.0.cygwin.tar.gz (Cygwin)
+Dist File: http://bklyn.org/~cae/etree-scripts-3.1.tar.gz	 (*NIX)
+	   http://bklyn.org/~cae/etree-scripts-3.1.cygwin.exe    (Cygwin)
 
 Home Page: http://sf.net/projects/etree-scripts/
 
