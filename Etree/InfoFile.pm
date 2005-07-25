@@ -373,10 +373,13 @@ sub parseinfo {
 	 print ">BAND/VENUE/DATE<: $para\n" if $self->{Debug};
 	 $self->parseband ($para);
       } elsif ($para =~ /^(?:source|src|xfer|transfer|seede[rd]|
-			   tape[rd]|recorded)\b/mix or
-	       $para =~ /\b($spots|$mics|$configs|$cables|$pres|$dats|
-			    $laptops|$digicards|$software)\b/) {
+			   tape[rd]|recorded)\b/mix
+	       or ($para =~ /\b($spots|$mics|$configs|$cables|$pres|$dats|
+				$laptops|$digicards|$software)\b/
+		   and (not exists $self->{Source} or
+			$para !~ /^($trackre)/))) {
 	 print ">SOURCEINFO<: $para\n" if $self->{Debug};
+	 $para =~ s/^(source|src)[[:punct:]]?\s*//mi;
 	 push (@{$self->{Source}}, $para);
       } elsif ($para =~ /\b(cd|set|dis[ck]|volume|set)\b/i or
 	       $para =~ /^($trackre)/m) {
@@ -688,6 +691,9 @@ sub files {
 
    if (defined $ext) {
       $ext = lc $ext;
+      if (not exists $self->{ByExt}{$ext}) {
+	 return wantarray ? () : 0;
+      }
       return wantarray ?
 	sort keys %{$self->{ByExt}{$ext}} :
 	scalar keys %{$self->{ByExt}{$ext}};
