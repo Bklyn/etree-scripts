@@ -382,6 +382,20 @@ sub convert_files {
       }
    }
 
+   # Remove old .skt files
+   my @SKTS = $info->files ("skt");
+
+   if (scalar @SKTS) {
+      logmsg ("Removing Shorten v3 seek-table files:");
+
+      foreach my $file (@SKTS) {
+	 logmsg ("\t$file");
+	 if (not $dryrun) {
+	    unlink ($file) or die "Unable to remove $file: $!\n";
+	 }
+      }
+   }
+
    # Remove empty subdirs
    if (not $dryrun) {
       logmsg ("Removing empty subdirectories\n");
@@ -476,9 +490,12 @@ sub tag_files {
 
       my @TAGS;
       foreach my $tag (keys %TAGS) {
+	 my $value = $TAGS{$tag};
 	 push (@TAGS, "--remove-tag=$tag");
-	 push (@TAGS, "--set-tag=$tag=$TAGS{$tag}")
-	   if defined $TAGS{$tag};
+	 if (defined $value) {
+	    $value =~ s@\r?\n@ // @g;
+	    push (@TAGS, "--set-tag=$tag=$value");
+	 }
       }
       my @CMD = ("metaflac", @TAGS, $files->[$index]);
 
