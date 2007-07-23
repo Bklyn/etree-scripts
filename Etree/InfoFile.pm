@@ -40,7 +40,7 @@ eval "use Date::Parse";
 my $have_date_parse = not $@;
 
 (my $REV = q$Revision$) =~ s/^Revision:\s+([\d\.]+)\s.*/$1/;
-my $VERSION = sprintf "%d.%03d", $REV =~ /(\d+)/g;
+my $VERSION = $REV;
 my $debug = 0;
 my $test = 0;
 
@@ -372,18 +372,18 @@ sub parseinfo {
 	   not exists $self->{Venue})) {
 	 print ">BAND/VENUE/DATE<: $para\n" if $self->{Debug};
 	 $self->parseband ($para);
-      } elsif ($para =~ /^(?:source|src|xfer|transfer|seede[rd]|
+      } elsif ($para =~ /^(source|src|xfer|transfer|seede[rd]|
 			   tape[rd]|recorded)\b/mix
 	       or ($para =~ /\b($spots|$mics|$configs|$cables|$pres|$dats|
 				$laptops|$digicards|$software)\b/
 		   and (not exists $self->{Source} or
-			$para !~ /^($trackre)/))) {
-	 print ">SOURCEINFO<: $para\n" if $self->{Debug};
+			$para !~ /^($trackre)/m))) {
+	 print ">SOURCEINFO [$1]<: $para\n" if $self->{Debug};
 	 $para =~ s/^(source|src)[[:punct:]]?\s*//mi;
 	 push (@{$self->{Source}}, $para);
       } elsif ($para =~ /\b(cd|set|dis[ck]|volume|set)\b/i or
 	       $para =~ /^($trackre)/m) {
-	 print ">DISCINFO/TRACKINFO<: $para\n" if $self->{Debug};
+	 print ">DISCINFO/TRACKINFO [$1]<: $para\n" if $self->{Debug};
 	 $self->parsetracks ($para);
       } elsif ($para =~ /^([\*\@\#\$\%\^]+)\s*[-=:]?\s*/) {
 	 $self->parsetracks ($para);

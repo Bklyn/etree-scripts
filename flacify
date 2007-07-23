@@ -236,9 +236,9 @@ sub convert_files {
       my $groupby = "Set";
 
       map {
-	 my $set = $_->{Set} || 0;
+	 my $set = exists $_->{Set} ? $_->{Set} : 0;
 	 $GROUPS{$set}->{$_->{Index}} = $_;
-      } @$songs;
+      } grep { defined and exists $_->{Index} } @$songs;
 
       # If we dopn't have any set info, group files by disc instead
       if (scalar keys %GROUPS <= 1 and exists $GROUPS{0}) {

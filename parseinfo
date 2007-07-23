@@ -15,7 +15,7 @@ GetOptions ("debug!" => \$debug);
 foreach my $arg (@ARGV) {
    my $info = new Etree::InfoFile (Directory => (-d $arg ? $arg : undef),
 				   InfoFile => (-f $arg ? $arg : undef),
-				   debug => $debug)
+				   Debug => $debug)
      or die;
    $info->parse;
 

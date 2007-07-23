@@ -1,4 +1,5 @@
 .cvsignore
+Build.PL
 burn-shns
 cdfill
 ChangeLog
@@ -17,7 +18,6 @@ Makefile.PL
 makehbx
 MANIFEST
 md5check
-META.yml			Module meta-data (added by MakeMaker)
 parseinfo
 README
 shn2mp3
