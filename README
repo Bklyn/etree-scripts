@@ -3,12 +3,21 @@
  / _ \ __| '__/ _ \/ _ \_____/ __|/ __| '__| | '_ \| __/ __|
 |  __/ |_| | |  __/  __/_____\__ \ (__| |  | | |_) | |_\__ \
  \___|\__|_|  \___|\___|     |___/\___|_|  |_| .__/ \__|___/
-                                             |_| V3.1
+                                             |_| V3.2
 
-Announcing release 3.1 of etree-scripts, a set of (mostly) Perl
+Announcing release 3.2 of etree-scripts, a set of (mostly) Perl
 scripts for lossless audio freaks who get busy on the command line.
 
-This is a bug-fix release for version 3.0:
+This is a bug-fix release for version 3.1:
+
+* Fixed problem when parsing track details having words like
+  "stand", "matrix", and "turtle beach" where they were mistakenly
+  identified as source information.
+
+* Fixed error 'Modification of a read-only value attempted at
+  /usr/bin/flacify line 241'.
+
+Changes since version 3.0:
 
 * Fixed bug in unshn where it reversed the arguments to the shorten
   command.

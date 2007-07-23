@@ -1,3 +1,9 @@
+etree-scripts (3.2-3) unstable; urgency=low
+
+  * Parsing module bug-fixes.
+
+ -- Caleb Epstein <cae@bklyn.org>  Mon, 23 Jul 2007 17:12:17 -0400
+
 etree-scripts (3.1-2) unstable; urgency=low
 
   * Bug-fixes for 3.0.  See README.
