@@ -750,9 +750,10 @@ in this tag.
 
 =item B<FFP Creation>
 
-If no file named C<ffp.txt> exists in the new directory, one will be
-created.  It will contain the output of C<metaflac --show-md5sum
-*.flac>.
+If L<flacify> does not find any text files containing FLAC
+fingerprints, it will create a new file called F<ffp.txt> containing
+the output of C<metaflac --show-md5sum> for all the FLAC files in the
+set.
 
 =item B<MD5 Renaming>
 

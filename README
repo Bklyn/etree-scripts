@@ -8,7 +8,7 @@
 Announcing release 3.2 of etree-scripts, a set of (mostly) Perl
 scripts for lossless audio freaks who get busy on the command line.
 
-This is a bug-fix release for version 3.1:
+Changes since version 3.1:
 
 * Fixed problem when parsing track details having words like
   "stand", "matrix", and "turtle beach" where they were mistakenly
@@ -16,6 +16,9 @@ This is a bug-fix release for version 3.1:
 
 * Fixed error 'Modification of a read-only value attempted at
   /usr/bin/flacify line 241'.
+
+* Flacify won't create 'ffp.txt' if it finds FLAC fingerprints in some
+  other .txt or .ffp file.
 
 Changes since version 3.0:
 
