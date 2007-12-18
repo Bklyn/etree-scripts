@@ -102,16 +102,22 @@ sub check_md5 {
 sub check_ffp {
    my ($file, $sum) = @_;
    my ($dir, $base) = (dirname ($file), basename ($file));
-
-   chdir ($dir) or die "Can't chdir to $dir: $!\n";
+   my $oldcwd = getcwd();
 
    findexe ("metaflac") or die;
 
-   open (METAFLAC, "-|", "metaflac", "--show-md5sum", $base)
-     or return 1;
+   chdir ($dir) or die "Can't chdir to $dir: $!\n";
+
+   if (not open (METAFLAC, "-|", "metaflac", "--show-md5sum", $base)) {
+      chdir $oldcwd;
+      return 1;
+   }
+
    my $hexdigest = <METAFLAC>;
    close METAFLAC;
    $hexdigest =~ s/\s+$//m;	# Remove \n or \r\n
+
+   chdir ($oldcwd);
 
    return ($hexdigest eq $sum) ? 0 : 1;
 }
