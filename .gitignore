@@ -1,0 +1,9 @@
+*-stamp
+.cvsignore
+.svn
+Build
+Makefile
+_build
+blib
+maybe-Build.PL
+pm_to_blib

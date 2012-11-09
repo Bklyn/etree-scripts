@@ -1,0 +1,381 @@
+#!/usr/bin/perl -w
+#
+# makehbx - Convert an etree-compliant text file and set of SHNs into
+# an XML file suitable for use with the Hillsboro XML Recording
+# Archive specification <URL: http://www.catchen.org/hillsboro/>.
+#
+# The genesis for this script is the "shn2make" tool written by C R
+# Johnson.  The current code bears little resemblance to his original
+# work, but some of his underlying ideas and structure remain.  The
+# rest of this script written and Copyright 2002, Caleb Epstein and
+# released under the terms of the Perl Artistic License <URL:
+# http://www.perl.com/language/misc/Artistic.html>
+#
+# Feel free to add features (and fix bugs!) but please submit any
+# changes back to the author at <cae at bklyn dot org>.  I'd like this
+# to always be the latest and greatest version.
+#
+# $Id: makehbx 55 2004-02-09 18:10:43Z cepstein $
+
+use strict;
+use Getopt::Long;
+use File::Basename;
+use Data::Dumper;
+use HTML::Entities;		# Some folks might not have this; get it
+use Cwd;
+use Cwd 'abs_path';
+use lib dirname $0;
+use Etree::InfoFile;
+
+$File::Find::dont_use_nlink = 1; # Incase this is smbfs or whatever
+
+my $progname = basename $0;
+my $version = '$Revision: 55 $ ';
+$version =~ s/^.Revision:\s+//; $version =~ s/\s*\$\s*$//;
+my $debug = 0;
+my $writefiles = 0;
+my $force = 0;
+
+# usage - generate a usage message
+sub usage {
+   use Pod::Text;
+   pod2text ($0);
+}
+
+sub version {
+   print <<EOF
+
+$progname version $version
+
+Copyright 2002, Caleb Epstein
+
+Copying and modification permitted only under the terms of the Perl
+Artistic License, the text of which is available at <URL:
+http://www.perl.com/language/misc/Artistic.html>
+
+EOF
+  ;
+}
+
+# read the shns in the current directory
+if (not GetOptions("debug" => \$debug,
+		   "help|?" => sub { usage; exit (0); },
+		   "version" => sub { version; exit (0); },
+		   "write!" => \$writefiles,
+		   "force!" => \$force)) {
+   usage;
+   exit (2);
+}
+
+sub shnlen {
+   my $file = shift;
+   my $length;
+
+   open (SHNINFO, "shntool info \Q$file\E 2>/dev/null |") or return;
+
+   while (<SHNINFO>) {
+      if (/^length:\s+([\d\.:]+)/) {
+	 $length = $1;
+	 last;
+      }
+   }
+   close SHNINFO;
+   $length;
+}
+
+sub fmttime {
+   my $seconds = shift;
+   my $time;
+
+   if (defined $seconds) {
+      my $min = int ($seconds / 60);
+      my $sec = int ($seconds - 60 * $min);
+      my $frames = 75 * ($seconds - $sec - 60 * $min);
+      if ($frames) {
+	 $time = sprintf ("%d:%02d.%02d", $min, $sec, $frames);
+      } else {
+	 $time = sprintf ("%d:%02d", $min, $sec);
+      }
+   }
+
+   $time;
+}
+
+sub dumpxml {
+   my $info = shift;
+   my $ext;
+
+   foreach my $x ("shn", "flac", "ogg", "mp3") {
+      ($ext = $x, last) if scalar $info->files ($ext);
+   }
+
+   if ($writefiles) {
+      my $dir = dirname ($info->{"Directory"} || $info->{"InfoFile"});
+      my $base = basename ($info->{"Directory"} || $info->{"InfoFile"});
+      $base =~ s/^(.+)\.([^\.]+)$/$1/;
+      my $filename = "$dir/$base.xml";
+
+      if (-f $filename and not $force) {
+	 warn "XML file $filename already exists; skipping.\n";
+	 return;
+      }
+
+      if (not open (XML, "> $filename")) {
+	 warn "Unable to open $filename for writing: $!\n";
+	 return;
+      }
+      select XML;
+   }
+
+   print <<EOF;
+<?xml version="1.0"?>
+<!DOCTYPE recording_archive SYSTEM "http://catchen.org/hillsboro/hbx.dtd">
+<recording_archive>
+EOF
+;
+
+print "  <format>$ext</format>\n" if defined $ext;
+
+   my @FIELDS = ("Band", "Venue", "CanonicalDate|Date", "Source",
+		 "Taper", "Transfer", "Seeder");
+
+   my %TAGS = ( "Band" => "performer",
+		"Venue" => "venue",
+		"CanonicalDate" => "date",
+		"Date" => "date",
+		"Source" => "source",
+		"Taper" => "recorder",
+		"Transfer" => "transfer",
+		"Seeder" => "seeder" );
+
+   # Print the basic details of the recording
+   foreach my $fieldlist (@FIELDS) {
+      my @FLD = split (/\|/, $fieldlist);
+      foreach my $field (@FLD) {
+	 if (exists $info->{$field}) {
+	    print "  <$TAGS{$field}>" .
+	      encode_entities ($info->{$field}) .
+		"</$TAGS{$field}>\n";
+	    last;
+	 }
+      }
+   }
+
+   # Dump disc information
+   if ($info->num_discs()) {
+      print "  <discs>\n";
+      foreach my $disc (1 .. $info->num_discs()) {
+	 print "    <disc id=\"$disc\" tracks=\"" .
+	   $info->num_tracks ($disc) . "\"\>\n";
+	 if (exists $info->{"Disc"}{$disc}{"Seconds"}) {
+	    print "      <time>" . fmttime ($info->{"Disc"}{$disc}{"Seconds"}) .
+	      "</time>\n";
+	 }
+	 print "    </disc>\n";
+      }
+      print "  </discs>\n";
+   }
+
+   # Now dump all the track information
+   my @SONGS = $info->songs ();
+   my @FILES = $info->files ($ext);
+
+   if (scalar @SONGS) {
+      print "  <tracks>\n";
+      my $index = 1;
+
+      foreach my $song (@SONGS) {
+	 print "    <track" .
+	   (exists $song->{"Set"} ? " set=\"$song->{Set}\"" : "") .
+	     (exists $song->{"Disc"} ? " disc=\"$song->{Disc}\"" : "") .
+	       (exists $song->{"Track"} ? " number=\"$song->{Track}\"" : "") .
+		 (exists $song->{"Notes"} ? " id=\"$song->{Notes}\"" : "") .
+		   ">\n";
+	 print "      <title>$song->{Title}</title>\n"
+	   if exists $song->{"Title"};
+
+	 my $audiofile = $FILES[$index++ - 1];
+
+	 if (defined $audiofile) {
+	    print "      <filename>" . basename ($audiofile) .
+	      "</filename>\n";
+	 }
+
+	 if (exists $song->{"Time"} and defined $song->{"Time"}) {
+	    print "      <time>$song->{Time}</time>\n";
+	 }
+	 if (exists $song->{"Segue"}) {
+	    print "      <segue>true</segue>\n";
+	 }
+
+	 print "    </track>\n";
+      }
+      print "  </tracks>\n";
+   }
+
+   if (exists $info->{"Notes"}) {
+      print "  <notes>\n";
+
+      foreach my $id (keys %{$info->{"Notes"}}) {
+	 next unless length $info->{"Notes"}{$id};
+	 print "    <note id=\"" . encode_entities ($id) . "\">" .
+	   encode_entities ($info->{"Notes"}{$id}) .
+	     "</note>\n";
+      }
+
+      if (exists $info->{"Etc"}) {
+	 foreach my $etc (@{ $info->{"Etc"}}) {
+	    print "    <note>" .
+	      encode_entities ($etc) . "</note>\n";
+	 }
+      }
+      print "  </notes>\n";
+   }
+
+   print "</recording_archive>\n";
+
+   if ($writefiles) {
+      close XML;
+   }
+}
+
+push (@ARGV, getcwd()) unless scalar @ARGV;
+
+foreach my $dir (@ARGV) {
+   $dir = abs_path ($dir);	# Convert to absolute path
+
+   if (not -d $dir) {
+      warn "$dir: no such directory\n";
+      next;
+   }
+
+   my $info = new Etree::InfoFile (Directory => $dir) or die;
+
+   $info->parse;
+
+   print "Etree::InfoFile dump:\n", Dumper ($info), "\n" if $debug;
+
+   # Dump XML output
+   dumpxml ($info);
+}
+
+__END__
+
+=head1 NAME
+
+makehbx - Create an XML file based on an etree-compliant directory
+structure or text file
+
+=head1 SYNOPSIS
+
+makehbx [options] [directory or txt file ...]
+
+=head1 BACKGROUND
+
+Please refer to L<http://etree.org/> for information about etree.org
+and SHN files and L<http://www.catchen.org/hillsboro/> for information
+about the Hillsboro XML Recording Archive specification and the
+corresponding XML DTD.
+
+=head1 DESCRIPTION
+
+The purpose of this program is to take a directory tree that contains
+a live concert recording and an informational file that describes the
+recording, and turn it into an XML file.  This XML file will contain
+(to the best of B<makehbx>'s ability) all pertinent information about
+the recording structured in a more readily parseable format.  The
+script can also process just the informational file, but the generated
+XML will not contain as much information as when the source audio
+files are also present.
+
+Other tools built to the HBX specification can then use this file to:
+
+=over 4
+
+=item *
+
+Create formatted HTML summaries of the recording information
+
+=item *
+
+Create printable CD labels and jewel case tray cards
+
+=item *
+
+Convert the audio files to another format (e.g. MP3) and tag them with
+the appropriate meta-data.
+
+=item *
+
+Load the information into a database or keep a user's personal "tape
+list" up to date.
+
+=back
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--write>
+
+Save XML for each B<directory> processed in B<directory/basename.xml>,
+where B<basename> is the name of the directory stripped of any
+extension.  The default is to send output to stdout.
+
+=item B<--force>
+
+When run in B<--write> mode, will force overwriting of any existing
+B<directory/basename.xml> if it already exists.  The default is to not
+overwrite an existing file.
+
+=item B<--debug>
+
+Turn on debugging.  Causes the script to generate additional output on
+standard output.
+
+=item B<--help>
+
+Print a usage message and exit.
+
+=item B<--version>
+
+Print the version number of the script and exit.
+
+=item B<directory or text file ...>
+
+The user should specify the name of a directory containing
+SHN/MP3/FLAC/OGG files and an accompanying TXT or NFO file, or the
+full path to a TXT/NFO file.  The text file will be parsed for
+information about the set of audio files, including band name, venue,
+the names of tracks, any source and transfer information, and
+additional notes.
+
+You may specify multiple directories or text files, or a mix of both
+on the command line.  Each will be processed individually.  When a
+directory is specified, the script will be able to collect additional
+information to be included in the output (e.g. running times of
+tracks, file checksums and sizes).
+
+=back
+
+=head1 SEE ALSO
+
+L<shorten(1)>, L<shntool(1)>, L<flac(1)>, L<lame(1)>, L<oggenc(1)>
+
+From the L<http://catchen.org/hillsboro/> site: L<XML::Hbx>,
+L<shn2hbx.pl>, L<hbx2txt.pl>, L<hbx2html.pl>, L<hbx2ps.pl>
+
+=head1 AUTHOR
+
+This script Copyright 2002, Caleb Epstein E<lt>cae at bklyn dot
+orgE<gt>.  It is based originally on the B<shn2make> utility written
+by C R Johnson, but bears little if any resemblance to that script
+now.
+
+=head1 LICENSE
+
+Copying and modification allowed only under the terms of the Perl
+Artistic License, the text of which is available at
+L<http://www.perl.com/language/misc/Artistic.html>
+
+=cut

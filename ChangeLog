@@ -1,0 +1,355 @@
+2005-06-03  Caleb Epstein  <cae at bklyn dot org>
+
+	* debian/changelog, INSTALL, README: Updates for version 3.0
+
+	* META.yml: This is a generated file
+
+	* Etree/InfoFile.pm:
+	Parsing improvements for un-numbered tracklists.  Flacify needs Index
+	in the song list.
+
+	* Makefile.PL, flacify, shn2mp3:
+	More fixes for new parsing and Cygwin support
+
+	* shn2mp3: Fixes for updated InfoFile module
+
+	* shn2mp3: Use flac args --totally-silent and
+	--apply-replaygain-which-is-not-lossless (yes, thats a real argument).
+
+	* Etree/InfoFile.pm, flacify: Major parsing improvements (I think).
+
+	* cdfill:
+	Use a two-phase rename to fix a bug where original files could be lost
+
+2004-11-11  Caleb Epstein  <cae at bklyn dot org>
+
+	* Etree/InfoFile.pm: Some improvements when no song names can be found.
+
+2004-09-09  Caleb Epstein  <cae at bklyn dot org>
+
+	* debian/compat: *** empty log message ***
+
+2004-09-02  Caleb Epstein  <cae at bklyn dot org>
+
+	* debian/changelog: Version 2.3
+
+	* ChangeLog: *** empty log message ***
+
+	* Makefile.PL: Version 2.3
+
+	* flacify: Add ReplyGain information to FLACs if it does not exist
+	(--noreplay-gain to disable).  Allow user to configure tag format.
+
+	* md5check: Put parens around args to open()
+
+	* shn2mp3: Cygwin enhancements
+
+2004-07-28  Caleb Epstein  <cae at bklyn dot org>
+
+	* Etree/InfoFile.pm: Deal with no Locale module
+
+2004-07-09  Caleb Epstein  <cae at bklyn dot org>
+
+	* flacify: Conviert paths to absolute before we do any chdirs.
+
+2004-04-20  Caleb Epstein  <cae at bklyn dot org>
+
+	* debian/changelog, ChangeLog, Makefile.PL: Release 2.2 (bugfix)
+
+2004-04-19  Caleb Epstein  <cae at bklyn dot org>
+
+	* md5check:
+	Bug fix for the "check_file" routine.  Need to chdir to the directory
+	holding the file and use relative paths.
+
+2004-04-14  Caleb Epstein  <cae at bklyn dot org>
+
+	* shn2mp3: Need to chdir
+
+	* ChangeLog: etree-scripts 2.1
+
+	* Etree/InfoFile.pm: More parsing improvements
+
+	* debian/changelog: etree-script 2.1
+
+	* shn2mp3: Work more nicely on Windows.
+
+	* flacify: Work more nicely on Windows.  Handle no song titles better
+
+	* Makefile.PL: etree-scripts 2.1
+
+	* Etree/InfoFile.pm: Documentation (sparse) and parsing improvements
+
+2004-03-16  Caleb Epstein  <cae at bklyn dot org>
+
+	* md5check:
+	Put c:\program files\flac into the PATH when running on Windows.
+	Change directory to where the files live and pass only basenames to
+	metaflac/flac.  Strip \r\n from metaflac output on Cygwin.
+
+2004-03-08  Caleb Epstein  <cae at bklyn dot org>
+
+	* unshn: Fix sprintf when sample rate != 44.1 kHz
+
+2004-02-17  Caleb Epstein  <cae at bklyn dot org>
+
+	* Etree/InfoFile.pm:
+	Use relative paths to files.  Makes working with (e.g.) Cygwin when
+	you have to call non-Cygwin executables simpler.
+
+	* flacify: Change directory for each show
+
+2004-02-14  Caleb Epstein  <cae at bklyn dot org>
+
+	* META.yml: Adds requires
+
+	* README: Modified header/footer
+
+	* debian/rules: Added README
+
+	* debian/control, README: *** empty log message ***
+
+	* Makefile.PL: Added PREREQ_PM for required modules
+
+	* MANIFEST: Added README, INSTALL
+
+	* burn-shns, cdfill: Cleanups
+
+	* INSTALL, README: Version 2.0
+
+2004-02-13  Caleb Epstein  <cae at bklyn dot org>
+
+	* shn2ogg: Just call shn2mp3 --ogg
+
+	* ChangeLog: dh-make-perl
+
+	* MANIFEST, META.yml, Makefile.PL, debian/control, debian/copyright, debian/dirs, debian/rules, debian/substvars:
+	Reworked debian dir using dh-make-perl
+
+	* ChangeLog: Release 2.0
+
+	* Makefile.PL: Removed "shn"; added "shn2ogg"
+
+	* debian/rules: Fixed "build" target
+
+	* debian/changelog: More details on 2.0
+
+	* debian/README.debian: Updated to mention FLAC
+
+	* .cvsignore: added Makefile
+
+	* MANIFEST: First revision
+
+	* shn: Removed
+
+	* debian/rules: Use Makefile.PL.  Install ChangeLog.
+
+	* Makefile.PL: Comment header
+
+	* md5check, shn2mp3: POD documentation
+
+	* shn2mp3: Can't use %ENCODER in version()
+
+	* Makefile.PL: First revision
+
+	* Makefile: Use Makefile.PL
+
+	* flacify: POD documentation
+
+	* Etree/InfoFile.pm:
+	Added auditorium to venues; fixed date parsing bug (case-sensitive); version -> VERSION
+
+	* pop.pl: Removed
+
+2004-02-12  Caleb Epstein  <cae at bklyn dot org>
+
+	* shn2mp3:
+	Make sure binaries exist in the PATH before we try to run them, and
+	provide a URL where the user might find them if they are missing.
+
+	* Etree/InfoFile.pm:
+	Move venue check later; use [:punct:] to match punctuation
+
+	* shn2mp3:
+	Allow users to specify CBR encoding for MP3 again via -b.  You may use
+	one of --preset, --alt-preset or -b to specify the encoding method.
+
+2004-02-09  Caleb Epstein  <cae at bklyn dot org>
+
+	* shn2mp3: Rewritten to use Etree::InfoFile
+
+	* debian/changelog: Version 2.0
+
+	* makehbx: Rewritten to use Etree::InfoFile.  Missing a few features.
+
+	* Etree/InfoFile.pm:
+	Some fine folks write running time as M:SS.FFF.  Go figger.
+
+2004-02-06  Caleb Epstein  <cae at bklyn dot org>
+
+	* shn2flac: Renamed shn2flac -> flacify
+
+	* flacify: Renamed from shn2flac
+
+	* Etree/InfoFile.pm:
+	Found Locale::Country.  We're internationally known and known to rock
+	a microphone.
+
+2004-01-29  Caleb Epstein  <cae at bklyn dot org>
+
+	* Etree/InfoFile.pm:
+	Improved parsing and error messages.  Added Canadian province abbrevs
+	to "states"
+
+	* parseinfo: Print more info
+
+	* shn2mp3: Use lame --preset instead of specifying an explicit bitrate.
+
+	* shn2flac: first official release
+
+2003-12-01  Caleb Epstein  <cae at bklyn dot org>
+
+	* parseinfo: Test bench for Etree::InfoFile
+
+	* Etree/InfoFile.pm: first revision
+
+	* shn2mp3: Quote output file for shell meta-chars
+
+2003-10-21  Caleb Epstein  <cae at bklyn dot org>
+
+	* shn2mp3:
+	Don't try and map based on disk + track index, just count the audio
+	files and the song names in the text file.
+
+2003-08-29  Caleb Epstein  <cae at bklyn dot org>
+
+	* shn2mp3: Some fixes
+
+2003-07-16  Caleb Epstein  <cae at bklyn dot org>
+
+	* unshn:
+	Pass --silent to flac and install an error handler in Audio::Wav
+
+2003-02-28  Caleb Epstein  <cae at bklyn dot org>
+
+	* md5check: Change output slightly for when all files are OK.
+
+	* md5check: Added my info in there :)
+
+	* md5check: Surround filename with \Q\E when opening pipeline
+
+2003-02-27  Caleb Epstein  <cae at bklyn dot org>
+
+	* md5check: Fixed one message to use basename.
+
+	* md5check:
+	Some large changes.  Parse any file like .txt, .md5 or .ffp with the
+	same code.  Look for lines that appear to be md5 checksums and verify
+	them with the appropriate handler (Digest::MD5 or metaflac
+	--show-md5sum).  Keep track of total number of ok/missing/errors and
+	report for each file we process and as a summary total.
+
+	Recognizes, but for now, ignores any WAV data checksums made by
+	shntool.
+
+2003-02-26  Caleb Epstein  <cae at bklyn dot org>
+
+	* md5check: FFP support.
+
+2002-12-05  Caleb Epstein  <cae at bklyn dot org>
+
+	* shn2mp3: Strip off trailing whitespace and dash from song title
+
+2002-11-26  Caleb Epstein  <cae at bklyn dot org>
+
+	* shn2mp3:
+	Handle ogg/flac/mp3 input files in addition to shorten files.
+
+2002-11-21  Caleb Epstein  <cae at bklyn dot org>
+
+	* shn2mp3: Initial release of ogg support.
+
+	* shn2mp3: Some minor changes which fix a lot of parsing problems
+
+2002-11-08  Caleb Epstein  <cae at bklyn dot org>
+
+	* debian/changelog: Version 1.4-2
+
+	* unshn: Fix for relative path names.
+
+2002-10-23  Caleb Epstein  <cae at bklyn dot org>
+
+	* Makefile: fixed tarball target
+
+	* debian/changelog: 1.4-1
+
+	* makehbx: Merge parsing fixed from shn2mp3
+
+	* shn2mp3: Some parsing improvements.
+
+	* burn-shns: Handle being called with no arguments properly.
+
+2002-10-21  Caleb Epstein  <cae at bklyn dot org>
+
+	* makehbx:
+	Patch from shn2mp3 - don't think a song which has a state abbrev in it
+	(e.g. AC/DC Bag) is location info once we're parsing disc info.
+
+	* shn2mp3:
+	Don't tag albums with [N/M] disc numbering.  Just number all tracks
+	from 1 -> n sequentially for the entire set.
+
+2002-10-09  Caleb Epstein  <cae at bklyn dot org>
+
+	* md5check: Bug fix for running with no args
+
+	* md5check:
+	Check FLAC files one-by-one since flac -t exits on an error (weak!)
+
+2002-09-27  Caleb Epstein  <cae at bklyn dot org>
+
+	* shn2mp3:
+	Fix byte-swapping issue under cygwin (pass -x to lame).  Support a
+	configuration file ~/.shn2mp3rc which looks like the command line
+	(e.g. --lameopts "-V 3").  Don't assume "." if no directories apre
+	specified.
+
+2002-09-26  Caleb Epstein  <cae at bklyn dot org>
+
+	* debian/rules: Commented out binary_arch
+
+	* debian/changelog: New version
+
+	* make-toc: First sourceforge version
+
+	* unshn: Fixed $version
+
+2002-09-25  Caleb Epstein  <cae at bklyn dot org>
+
+	* debian/changelog, debian/control, Makefile, burn-shns, cdfill, makehbx, md5check, shn, shn2mp3, unshn:
+	Merges from bklyn.org copies
+
+2002-08-20  Caleb Epstein  <cae at bklyn dot org>
+
+	* debian/.cvsignore, debian/README.debian, debian/changelog, debian/control, debian/copyright, debian/dirs, debian/rules, debian/substvars, .cvsignore, Makefile, burn-shns, cdfill, makehbx, md5check, pop.pl, shn, shn2mp3, unshn:
+	Updated all version numbers to 2.0
+
+	* debian/.cvsignore, debian/README.debian, debian/changelog, debian/control, debian/copyright, debian/dirs, debian/rules, debian/substvars, pop.pl, shn, shn2mp3, unshn, .cvsignore, Makefile, burn-shns, cdfill, makehbx, md5check:
+	Changed version fo all files to 1.3
+
+	* debian/.cvsignore, debian/README.debian, debian/changelog, debian/control, debian/copyright, debian/dirs, debian/rules, debian/substvars, makehbx:
+	Initial SourceForge checkin
+
+	* debian/.cvsignore, debian/README.debian, debian/changelog, debian/control, debian/copyright, debian/dirs, debian/rules, debian/substvars, makehbx:
+	New file.
+
+	* shn2mp3: Initial SourceForge checkin
+
+	* shn2mp3: New file.
+
+	* .cvsignore, Makefile, burn-shns, cdfill, md5check, pop.pl, shn, unshn:
+	Initial SourceForge checkin
+
+	* .cvsignore, Makefile, burn-shns, cdfill, md5check, pop.pl, shn, unshn:
+	New file.
+

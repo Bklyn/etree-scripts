@@ -1,0 +1,72 @@
+      _                                     _       _       
+  ___| |_ _ __ ___  ___       ___  ___ _ __(_)_ __ | |_ ___ 
+ / _ \ __| '__/ _ \/ _ \_____/ __|/ __| '__| | '_ \| __/ __|
+|  __/ |_| | |  __/  __/_____\__ \ (__| |  | | |_) | |_\__ \
+ \___|\__|_|  \___|\___|     |___/\___|_|  |_| .__/ \__|___/
+                                             |_| V3.2
+
+Announcing release 3.2 of etree-scripts, a set of (mostly) Perl
+scripts for lossless audio freaks who get busy on the command line.
+
+Changes since version 3.1:
+
+* Fixed problem when parsing track details having words like
+  "stand", "matrix", and "turtle beach" where they were mistakenly
+  identified as source information.
+
+* Fixed error 'Modification of a read-only value attempted at
+  /usr/bin/flacify line 241'.
+
+* Flacify won't create 'ffp.txt' if it finds FLAC fingerprints in some
+  other .txt or .ffp file.
+
+Changes since version 3.0:
+
+* Fixed bug in unshn where it reversed the arguments to the shorten
+  command.
+
+* Timestamp messages from flacify and shn2mp3.
+
+Some important changes in version 3.0:
+
+* Revamped parsing code.  The parser breaks up the info file first by
+  paragraphs and identifies their content broadly before splitting and
+  parsing things line-by-line.  The hope is that this leads to
+  better quality parsing overall.  I am working on a
+  Parse::RecDescent-based parser for the next major release.
+
+* Much improved Cygwin support.  I use it myself now.  There is also a
+  standalone Cygwin tar file that can be used to install etree-scripts
+  and all prerequisites in a single step.  See INSTALL for more
+  info.
+
+* Major improvements to the "flacify" command:
+
+  o Support for new FLAC 1.1 command line syntax (metaflac really)
+  o Creates a file called ffp.txt in the output directory with the
+    FLAC fingerprints for all files it has converted or tagged.
+  o Renames .md5 files to .md5.orig
+  o Automatically adds ReplayGain tags to FLAC files
+  o Handles missing/unparseable info file gracefully
+
+* The "shn2mp3" script will apply ReplayGain tags when extracting FLAC
+  files, so resulting MP3s are normalized to 0db.
+
+* Fixed a bug in the "cdfill" script where it could delete your
+  original files.
+
+* Scripts detect when running under ActiveState and abort.  Sorry, but
+  AS Perl is too broken to work with these scripts.  Use Cygwin.
+
+Dist File: http://bklyn.org/~cae/etree-scripts-3.1.tar.gz	 (*NIX)
+	   http://bklyn.org/~cae/etree-scripts-3.1.cygwin.exe    (Cygwin)
+
+Home Page: http://sf.net/projects/etree-scripts/
+
+Apt-Get:   deb http://etree.org/debian unstable contrib
+      _                      ____
+  ___| |_ _ __ ___  ___ _   / /  / bt.etree.org
+ / _ \ __| '__/ _ \/ _ (_) / / /   db.etree.org
+|  __/ |_| | |  __/  __/_ / / /  wiki.etree.org
+ \___|\__|_|  \___|\___(_)_/_/ forums.etree.org
+

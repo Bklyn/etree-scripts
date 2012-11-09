@@ -1,0 +1,473 @@
+#!/usr/bin/perl -w
+#
+# md5check - recursively check md5sums on a directory tree.
+#
+# Requires the Digest::MD5 module.
+#
+# Author: Caleb Epstein <cae at bklyn dot org>
+#
+# $Id: md5check 149 2007-12-18 16:02:01Z cepstein $
+
+use strict;
+use File::Find;
+use File::Basename;
+use File::Spec;
+use Cwd;
+
+$File::Find::dont_use_nlink = 1;
+
+eval "use Digest::MD5";
+
+if ($@) {
+   die <<EOF
+You must install the Digest::MD5 Perl module for this script to work.  This
+is available as the package "libdigest-md5-perl" on Debian/GNU Linux, or
+on other systems you should be able to run:
+
+    perl -MCPAN -eshell
+
+and (after any configuration steps) type
+
+  install Digest::MD5
+
+Thanks, and sorry for the inconvenience.
+EOF
+  ;
+}
+
+(my $progname = basename $0) =~ s/\.pl$//;
+my $checksum_regex = qr/\b[\da-f]{32}\b/;
+my %HAVE_SUMS;
+my %EXES;
+my %URLS = ("metaflac" => "http://flac.sourceforge.net/",
+	    "flac" => "http://flac.sourceforge.net/");
+
+# On Windows, add the FLAC install dir to the PATH
+if ($^O eq "MSWin32") {		# Active State
+   die "Sorry, ActiveState Perl is too broken for this script to work.\n" .
+     "Please install Cygwin (http://www.cygwin.com/) instead.\n";
+} elsif ($^O eq "cygwin") {	# Cygwin
+   $ENV{"PATH"} .= ':/c/Program Files/FLAC'
+     if -d '/c/Program Files/FLAC';
+}
+
+# findexe - find a program in the PATH
+sub findexe {
+   my $command = shift;
+   my ($exe, $rest) = split (/ /, $command, 2);
+
+   return $EXES{$exe} if exists $EXES{$exe};
+
+   my $fullpath;
+
+   $fullpath = $exe if $exe =~ m@^/@ and -x $exe;
+
+   if (not defined $fullpath) {
+      my @PATH = File::Spec->path();
+      foreach my $dir (@PATH) {
+	 if (-x "$dir/$exe") {
+	    $fullpath = "$dir/$exe";
+	    last;
+	 }
+      }
+   }
+
+   if (not defined $fullpath) {
+      die "Unable to find `$exe' in your PATH." .
+	(exists $URLS{$exe} ? "  Try $URLS{$exe}" : "") . "\n";
+   }
+
+   $EXES{$exe} = $fullpath;
+}
+
+# check_md5 - compute the MD5 digest of a file and compare it to a
+# known-good digest string
+sub check_md5 {
+   my ($file, $sum) = @_;
+
+   open (FILE, $file) or return 1;
+
+   binmode FILE;		# In case we're on Windows
+
+   my $md5 = Digest::MD5->new;
+   my $hexdigest = $md5->addfile (*FILE)->hexdigest;
+
+   close FILE;
+
+   return ($hexdigest eq $sum) ? 0 : 1;
+}
+
+# check_ffp - extract the MD5 "fingerprint" from a FLAC file and
+# compare it to a known-good digest string
+sub check_ffp {
+   my ($file, $sum) = @_;
+   my ($dir, $base) = (dirname ($file), basename ($file));
+   my $oldcwd = getcwd();
+
+   findexe ("metaflac") or die;
+
+   chdir ($dir) or die "Can't chdir to $dir: $!\n";
+
+   if (not open (METAFLAC, "-|", "metaflac", "--show-md5sum", $base)) {
+      chdir $oldcwd;
+      return 1;
+   }
+
+   my $hexdigest = <METAFLAC>;
+   close METAFLAC;
+   $hexdigest =~ s/\s+$//m;	# Remove \n or \r\n
+
+   chdir ($oldcwd);
+
+   return ($hexdigest eq $sum) ? 0 : 1;
+}
+
+# parse_checksum_line - parse a line and split it into a checksum,
+# filename, and a reference to the function we need to check the sum
+sub parse_checksum_line {
+   my $line = shift;
+   my ($file, $checksum, $checker) = ("", undef, undef);
+
+   if ($line =~ /^\s*(.+):($checksum_regex)\s*$/) {
+      ($file, $checksum, $checker) = ($1, $2, \&check_ffp);
+   } elsif ($line =~ /^\s*($checksum_regex)\s+\[shntool\]\s+(.+)\s*$/) {
+      # For now just ignore shntool WAV data checksums
+   } elsif ($line =~ /^\s*($checksum_regex)\s+\*?(.+)\s*$/) {
+      ($file, $checksum, $checker) = ($2, $1, \&check_md5);
+   }
+
+   ($file, $checksum, $checker);
+}
+
+sub plural {
+   my ($value, $string) = @_;
+   "$value $string" . ($value != 1 ? "s" : "");
+}
+
+sub print_summary {
+   my ($ok, $errors, $missing, $file) = @_;
+
+   return unless $ok or $errors or $missing;
+
+   $file ||= "Summary";
+   my $status = ($errors ? "ERROR: " : ($missing ? "WARNING: " : "All "));
+   my @SUMMARY;
+
+   push (@SUMMARY, plural ($ok, "file") . " OK") if $ok;
+   push (@SUMMARY, plural ($errors, "error")) if $errors;
+   push (@SUMMARY, plural ($missing, "missing file")) if $missing;
+
+   print "$file: $status" . join (", ", @SUMMARY) . "\n";
+}
+
+# check_file - look for MD5 checksums in a file (FLAC "fingerprint"
+# format or standard "md5sum" format) and check them.
+sub check_file {
+   my $sumfile = shift;
+   my $dir = dirname $sumfile;
+   my $base = basename $sumfile;
+   my $status = 0;
+   my $ok = 0;
+   my $errors = 0;
+   my $missing = 0;
+   my $oldcwd = getcwd();
+
+   if (not open (MD5, $sumfile)) {
+      warn "$progname: unable to open file $sumfile: $!\n";
+      return (0, 1, 0);
+   }
+
+   chdir ($dir) or die "Can't chdir to $dir: $!\n";
+
+   my $data;
+
+   # Slurp the entire file in one go
+   {
+      local $/ = undef;
+      $data = <MD5>;
+   }
+
+   $data =~ s/\r/\n/g;
+
+   # Split md5 data on newlines
+   my @LINES = split /\n/, $data;
+
+   # Pull out only lines that look like md5 lines (32 hex digits stand
+   # by themselves), and turn them into (file, sum, checker) triplets
+   my @SUMS = grep /$checksum_regex/, @LINES;
+   chomp @SUMS;
+
+   # Parse the line for filename, checksum, and functor; filter out
+   # lines which look like checksums but which have an undef'd functor
+   @SUMS = grep { defined $$_[2] }
+     map { [ parse_checksum_line ($_) ] } @SUMS;
+
+   # Sort by filename
+   @SUMS = sort { $$a[0] cmp $$b[0] } @SUMS;
+
+   if (not scalar @SUMS) {
+      chdir ($oldcwd);
+      return (0, 0, 0);
+   }
+
+   print "Checking $base (" . plural (scalar (@SUMS), "file") . "):\n";
+
+   $| = 1;
+
+   foreach (@SUMS) {
+      my ($file, $sum, $func) = @{$_};
+      my $fullfile = $file;
+
+      print " checking $file: ";
+
+      # Before even calling the appropriate function, check for
+      # existence and permissions to read
+      if (not -e $fullfile) {
+	 print "MISSING\n";
+	 $status |= 2;
+	 ++$missing;
+	 next;
+      } elsif (not -r $fullfile) {
+	 print "PERMISSION DENIED\n";
+	 $status |= 1;
+	 ++$errors;
+	 next;
+      }
+
+      # Run the checker
+      my $result = &$func ($fullfile, $sum);
+
+      if ($result == 0) {
+	 print "OK\n";
+	 ++$ok;
+      } elsif ($result == 2) {
+	 print "MISSING\n";
+	 $status |= 2;
+	 ++$missing;
+      } else {
+	 print "ERROR\n";
+	 $status |= 1;
+	 ++$errors;
+      }
+   }
+
+   print_summary ($ok, $errors, $missing, $base);
+   print "\n";
+
+   chdir ($oldcwd);
+
+   return ($ok, $errors, $missing);
+}
+
+# Check a set of .flac files for consistency
+sub check_flacfiles {
+   my @FILES = @_;
+   my $retval = 0;
+
+   my @OK;
+   my @FAILED;
+   my $lastok = 0;
+   my $lastfailed = 0;
+   my $lastdir;
+   my %NUMFILES;
+
+   map { ++$NUMFILES{ dirname($_) } } @FILES;
+
+   foreach my $file (@FILES) {
+      my $base = basename $file;
+      my $dir = dirname $file;
+
+      if (not defined $lastdir or $lastdir ne $dir) {
+	 if (defined $lastdir) {
+	    print_summary (scalar (@OK) - $lastok,
+			   scalar (@FAILED) - $lastfailed,
+			   0, basename $lastdir);
+	    print "\n";
+	    $lastok = scalar @OK;
+	    $lastfailed = scalar @FAILED;
+	 }
+
+	 print "Checking FLAC files in " . basename ($dir) . " (" .
+	   plural ($NUMFILES{$dir}, "file") . "):\n";
+
+	 chdir ($dir) or die "Can't chdir to $dir: $!\n";
+
+	 $lastdir = $dir;
+      }
+
+      print " checking $base: ";
+
+      findexe ("flac") or die;
+
+      my $retcode = system ("flac", "-t", "-s", $base);
+
+      my $exit_value  = $retcode >> 8;
+      my $signal_num  = $retcode & 127;
+      my $dumped_core = $retcode & 128;
+
+      if ($exit_value == 0 and not $signal_num and not $dumped_core) {
+	 print "OK\n";
+	 push (@OK, $file);
+      } else {
+	 warn "ERROR: FLAC exited" .
+	   ($exit_value ? " with status $exit_value" : "") .
+	     ($signal_num ? " from signal $signal_num" : "") .
+	       ($dumped_core ? " (dumped core)" : "") . "\n";
+	 # Stop processing if someone hits Ctrl-C
+	 last if $signal_num == 2;
+	 push (@FAILED, $file);
+	 $retval |= 1;
+      }
+   }
+
+   if (defined $lastdir) {
+      print_summary (scalar (@OK) - $lastok,
+		     scalar (@FAILED) - $lastfailed,
+		     0, basename $lastdir);
+      print "\n";
+   }
+
+   my $ok = scalar @OK;
+   my $failed = scalar @FAILED;
+
+   return ($ok, $failed, 0);
+}
+
+my %CHECKERS = ( '\.(ffp|md5|txt)$' => \&check_file,
+		 '\.flac$' => [ \&check_flacfiles ]);
+
+push (@ARGV, getcwd ()) unless scalar @ARGV;
+
+my %TODO;
+
+foreach my $arg (@ARGV) {
+   sub wanted {
+      return unless -f;
+      my $file = $File::Find::name;
+      foreach my $match (keys %CHECKERS) {
+	 if ($file =~ /$match/i) {
+	    push (@{$TODO{$match}}, $file);
+	    last;
+	 }
+      }
+   }
+   find (\&wanted, $arg);
+}
+
+my ($ok, $errors, $missing) = (0, 0, 0);
+
+foreach my $match (keys %TODO) {
+   my $function = $CHECKERS{$match};
+   my @FILES = sort @{$TODO{$match}};
+
+   if (ref ($function) eq "ARRAY") {
+      # Function can handle an array
+      $function = $$function[0];
+      my @A = &$function (@FILES);
+      $ok += $A[0];
+      $errors += $A[1];
+      $missing += $A[2];
+   } else {
+      # Function takes one file at a time
+      foreach my $file (@FILES) {
+	 my @A = &$function ($file);
+	 $ok += $A[0];
+	 $errors += $A[1];
+	 $missing += $A[2];
+      }
+   }
+}
+
+if ($ok or $errors or $missing) {
+   print_summary ($ok, $errors, $missing);
+}
+
+exit (0 | ($errors ? 1 : 0) | ($missing ? 2 : 0));
+
+__END__
+
+=head1 NAME
+
+md5check - Recursively verify files against external MD5 checksums
+
+=head1 SYNOPSIS
+
+md5check [directory [directory ...]]
+
+=head1 DESCRIPTION
+
+The purpose of L<md5check> is to verify that a file or set of files
+agree with MD5 checksums stored in some external file.
+
+You can specify a list of directories on the command line; the current
+working directory is used if no directory name is supplied.
+
+For each specified directory, L<md5check> recursively searches for any
+files whose names end in C<.md5>, C<.txt>, C<.ffp>, or C<.flac>.
+
+=over
+
+=item Text Files
+
+The first three file types are considered to be plain text, and
+L<md5check> reads them looking for lines that look like MD5 checksums,
+which are simply "words" of 32 hexadecimal digits.  These lines can be
+either of the form:
+
+C<filename:[:xdigit:]{32}>
+
+in which case they are taken to be L<"FLAC fingerprints">, or
+
+C<[:xdigit:]{32}\s+\*?filename\s*>
+
+in which case they are taken to be L<"MD5 checksums">.  These two
+different types of lines are handled as follows:
+
+=over
+
+=item FLAC fingerprints
+
+When a FLAC fingerprint is detected, md5check will run the command
+C<metaflac --show-md5sum> on the associated file and compare that
+output to the checksum given in the FLAC fingerprint.  If the two do
+not match, an error message is emitted.  If the file is missing, a
+warning is emitted.
+
+=item MD5 checksums
+
+When an MD5 checksum is detected, L<md5check> will use the
+L<Digest::MD5> module to compute its own MD5 hash on the file.  If the
+results do not match, an error message is emitted.  If the file is
+missing, a warning is emitted.
+
+=back
+
+=item FLAC Files
+
+For files whose names end in C<.flac>, L<md5check> will run the
+command C<flac -t -s>, which performs an integrity check on the file
+data.  If this command returns an error code, an error message is
+emuitted.
+
+=back
+
+=head1 EXIT CODE
+
+The exit status of the L<md5sum> command is derived from the results
+of all the files it has checked.  If no errors were encountered, the
+exit status is 0.  Otherwise, the exit status will be the 1 if any
+errors were encountered or 2 if any files were missing (warnings).  If
+there were both errors and missing files, the exit status will be 3
+(and 3 shall be the number of the counting!)
+
+=head1 VERSION
+
+$Id: md5check 149 2007-12-18 16:02:01Z cepstein $
+
+=head1 SEE ALSO
+
+L<md5sum>, L<flac>, L<metaflac>, L<Digest::MD5>
+
+=head1 AUTHOR
+
+Caleb Epstein E<lt>cae at bklyn dot orgE<gt>

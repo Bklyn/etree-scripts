@@ -1,0 +1,54 @@
+#!/usr/bin/perl -w
+
+use strict;
+use Etree::InfoFile;
+use Getopt::Long;
+use Data::Dumper;
+use File::Basename;
+
+my $debug = 0;
+
+$| = 1;
+
+GetOptions ("debug!" => \$debug);
+
+foreach my $arg (@ARGV) {
+   my $info = new Etree::InfoFile (Directory => (-d $arg ? $arg : undef),
+				   InfoFile => (-f $arg ? $arg : undef),
+				   Debug => $debug)
+     or die;
+   $info->parse;
+
+   print Dumper $info if $debug;
+
+   print join ("\n", grep defined,
+	       $info->artist, $info->date, $info->venue), "\n\n";
+
+   my @SONGS = $info->songs;
+   my $lastset = "";
+
+   my @SONGNAMES = map {
+      my $set = $_->{Set};
+      my $title = $_->{Title};
+
+      if (defined $set and $set ne $lastset) {
+	 $title = "$set: $title";
+	 $lastset = $set;
+      }
+      $title;
+   } @SONGS;
+
+   print join (", ", @SONGNAMES), "\n";
+
+   my @FILES = sort ($info->files ("flac"));
+
+   if (scalar @FILES) {
+      print "Files: ", join (", ", map { basename $_ } sort @FILES), "\n";
+   }
+
+   if (scalar @FILES == scalar @SONGS) {
+      foreach my $index (0 .. $#FILES) {
+	 print "$SONGS[$index]{Title} -> $FILES[$index]\n";
+      }
+   }
+}

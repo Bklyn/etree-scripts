@@ -1,0 +1,136 @@
+#!/usr/bin/perl -w
+#
+# cdfill - given a list of WAV and/or SHN files, calculate the
+# maximally-filled CD layout for them.  If --rename is specified, the
+# files are renamed to look like <prefix>d<n>t<nn>.<suffix>.  Doesn't
+# take into account breaking up jams or segues :)
+#
+# Author: Caleb Epstein <cae at bklyn dot org>
+#
+# $Id: cdfill 120 2005-06-03 04:59:29Z cepstein $
+
+
+use Getopt::Long;
+
+my $rename = 0;
+my $dryrun = 0;
+my $prefix;
+my $cdlen = 80;
+my $cd = 1;
+my $track = 1;
+my $time = 0;
+
+my $retval = GetOptions ("prefix=s" => \$prefix,
+			 "rename!" => \$rename,
+			 "dry-run!" => \$dryrun,
+			 "cdlen=f" => \$cdlen);
+
+push (@ARGV, glob ("*.[Ww][Aa][Vv] *.[Ss][Hh][Nn] *.[Ff][Ll][Aa][Cc]"))
+  unless scalar @ARGV;
+
+sub shnlen {
+   my @FILES = @_;
+   my %LEN;
+
+   my $fnregex = "(" . join ("|", map { quotemeta } @FILES) . ")";
+
+   open (SHNLEN, "shntool len @FILES|")
+     or die "Unable to open pipe to shntool: $!\n";
+
+   while (<SHNLEN>) {
+      next unless /^\s*(\d+):(\d{2})\.(\d{2})\s+\d+\s+.*$fnregex/o;
+      my ($min, $sec, $frames, $file) = ($1, $2, $3, $4);
+      $LEN{$file} = $min + $sec / 60 + $frames / (60 * 75);
+   }
+
+   return %LEN;
+}
+
+sub msfstring {
+   my $time = shift;
+   my $min = int $time;
+   my $sec = int (60 * ($time - int $min));
+   my $frames = ($time - $min - $sec / 60) * 75 * 60;
+
+   sprintf ("%d:%02d.%02d", $min, $sec, $frames);
+}
+
+my %LEN = shnlen (@ARGV);
+my %NAMES;
+my %CDS;
+
+foreach my $file (sort @ARGV) {
+   die unless exists $LEN{$file};
+   my $len = $LEN{$file};
+
+   die "Track $file is too long to fit on one $cdlen minute CD (" .
+     msfstring ($len) . ")\n" if $len > $cdlen;
+
+   if (not defined $prefix) {
+      $prefix = $file;
+      $prefix =~ s/^([^\d]+).*/$1/;
+      print "Using filename prefix '$prefix'\n";
+   }
+
+   if ($time + $len > $cdlen) {
+      $time = 0;
+      $track = 1;
+      $cd++;
+   }
+
+   $time += $len;
+
+   my $ext = $file; $ext =~ s/^.*\.(wav|shn|flac)$/$1/i;
+
+   $NAMES{$file} = sprintf ("${prefix}d${cd}t%02d.$ext", $track++);
+
+   push (@{ $CDS{$cd}{tracks} }, $rename ? $NAMES{$file} : $file);
+   $CDS{$cd}{len} = $time;
+
+   print "$file -> $NAMES{$file} [" . msfstring ($len) . "]\n";
+}
+
+# We rename in two passes to prevent something like this:
+#
+# d1t10 -> d2t01
+# d2t01 -> d2t02
+# d2t02 -> ...
+#
+# Which would end up clobbering every file after d1t10.
+if ($rename) {
+   print "Renaming files\n";
+
+   my @RENAMES = sort grep { $_ ne $NAMES{$_} } keys %NAMES;
+
+   if ($dryrun) {
+      print join ("\n", map { "$_ -> $NAMES{$_}" } @RENAMES), "\n";
+   }
+
+   foreach my $file (@RENAMES) {
+      my $target = $NAMES{$file} . ".tmp";
+      if ($dryrun) {
+	 print "$file -> $target\n";
+      } else {
+	 die "Cannot rename $file -> $target: target file already exists\n"
+	   if -e $target;
+	 rename ($file, $target) or die "rename $file -> $target: $!\n";
+      }
+   }
+
+   foreach my $file (@RENAMES) {
+      my $source = $NAMES{$file} . ".tmp";
+      my $target = $NAMES{$file};
+      if ($dryrun) {
+	 print "$source -> $target\n";
+      } else {
+	 die "Cannot rename $source -> $target: target file already exists\n"
+	   if -e $target;
+	 rename ($source, $target) or die "rename $source -> $target: $!\n";
+      }
+   }
+}
+
+foreach my $cd (sort { $a <=> $b } keys %CDS) {
+   print "CD $cd: " . scalar (@{ $CDS{$cd}{tracks}}) .
+     " tracks, total time " . msfstring ($CDS{$cd}{len}) . "\n";
+}

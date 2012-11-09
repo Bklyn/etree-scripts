@@ -1,0 +1,615 @@
+#!/usr/bin/perl -w
+#
+# shn2mp3 - Convert a directory of losslessly-compressed audio files
+# (SHN or FLAC) into a directory of lossily-compressed audio files
+# (MP3 or OGG) with useful tags.  Uses textfile parsing logic from the
+# Etree::InfoFile module to parse info file stored with the SHN files
+# to get information like the band name, venue, track names and
+# recording source.
+#
+# Latest version is always available from:
+#
+# http://bklyn.org/~cae/shn2mp3
+#
+# $Id: shn2mp3 142 2005-07-22 15:31:23Z cepstein $
+
+use strict;
+use Getopt::Long;
+use File::Basename;
+use File::Spec;
+use File::Find;
+use Data::Dumper;
+use POSIX qw(strftime);
+use File::Copy;
+use IO::Handle;
+use Text::ParseWords;
+use lib dirname $0;
+use Etree::InfoFile;
+use Text::Wrap;
+
+$Text::Wrap::break = qr/[\s\>]/;
+
+eval "use Date::Parse";
+my $have_date_parse = not $@;
+
+$File::Find::dont_use_nlink = 1; # Incase this is smbfs or whatever
+
+my %BANDS;
+(my $progname = basename $0) =~ s/\.pl$//;
+(my $version = q$Revision: 142 $) =~ s/^Revision: ([\d\.]+).*/$1/;
+my $debug = 0;
+my $writefiles = 0;
+my $force = 0;
+my $encoderopts = "";
+my $bitrate = 192;
+my $quality = 3;
+my $preset;
+my $altpreset = "standard";
+my $target = File::Spec->rel2abs (".");
+my $test = 0;
+my $rcfile = "$ENV{HOME}/.${progname}rc";
+my $output_type = ($progname =~ /(ogg|mp3)$/ ? $1 : "mp3");
+
+# ActiveState just can't get the job done.
+die "ActiveState Perl not supported; install Cygwin (http://www.cygwin.com)\n"
+  if $^O =~ /MSWin32/;
+
+# On Windows, add the FLAC install dir to the PATH
+if ($^O eq "MSWin32") {		# Active State
+   $ENV{"PATH"} .= ';c:\Program Files\FLAC'
+     if -d 'c:\Program Files\FLAC';
+} elsif ($^O eq "cygwin") {	# Cygwin
+   $ENV{"PATH"} .= ':/c/Program Files/FLAC'
+     if -d '/c/Program Files/FLAC';
+}
+
+# Wrap long lines nicely
+sub linewrap {
+   local ($Text::Wrap::columns) = 65;
+   my $text = shift;
+   my $initial = shift || "";
+   my $subsequent = shift || " " x 12;
+   Text::Wrap::wrap ($initial, $subsequent, $text);
+}
+
+# Types of audio files we recognize, by extension
+my @AUDIOEXT = ("shn", "mp3", "ogg", "flac");
+
+# extension - get the extension part of a filename
+sub extension {
+   my $filename = shift;
+   my $ext = $filename;
+   return if $ext =~ /(^(bak|orig)$|~$)/;
+   $ext =~ s/^.+\.([^\.]+)$/$1/;
+   $ext;
+}
+
+# shnlen - get the length of a SHN file in mm:ss.ff
+sub shnlen {
+   my $file = shift;
+   my $length;
+
+   open (SHNINFO, "shntool info \Q$file\E 2>/dev/null |") or return;
+
+   while (<SHNINFO>) {
+      if (/^length:\s+([\d:]+)/) {
+	 $length = $1;
+	 last;
+      }
+   }
+   close SHNINFO;
+   $length;
+}
+
+# parsetime - convert mm:ss.ff into seconds
+sub parsetime {
+   my $time = shift;
+   my $seconds = 0;
+
+   if (defined $time
+       and $time =~ /^(\d+)[:\.\'](\d{2})\"?(?:[:\.](\d{2}))?$/) {
+      $seconds = 60.0 * $1 + $2 + ($3 || 0) / 75.0;
+   }
+
+   $seconds;
+}
+
+# fmttime - convert seconds into m:ss.ff
+sub fmttime {
+   my $seconds = shift;
+   my $time;
+
+   if (defined $seconds) {
+      my $min = int ($seconds / 60);
+      my $sec = int ($seconds - 60 * $min);
+      my $frames = 75 * ($seconds - $sec - 60 * $min);
+      if ($frames) {
+	 $time = sprintf ("%d:%02d.%02d", $min, $sec, $frames);
+      } else {
+	 $time = sprintf ("%d:%02d", $min, $sec);
+      }
+   }
+
+   $time;
+}
+
+sub bytes_to_human {
+   my %UNITS = (1 => "B",
+                1024 => "kB",
+                1024 ** 2 => "MB",
+                1024 ** 3 => "GB",
+                1024 ** 4 => "TB",
+                1024 ** 5 => "PB");
+
+   my $nbytes = shift;
+   my $nunits;
+   my $units;
+
+   foreach my $divisor (sort { $a <=> $b } keys %UNITS) {
+      last if $nbytes < $divisor;
+      $units = $UNITS{$divisor};
+      $nunits = $nbytes / $divisor;
+   }
+
+   $nbytes = $nunits ? sprintf ("%.1f %s", $nunits, $units) : $nbytes;
+
+   $nbytes;
+}
+
+if (-f $rcfile and open (RCFILE, $rcfile)) {
+   local $/ = 0;		# Slup the whole file
+   unshift (@ARGV, shellwords (<RCFILE>));
+   close RCFILE;
+}
+
+my $retval = GetOptions ("lameopts=s" => \$encoderopts,
+			 "encoder-options=s" => \$encoderopts,
+			 "b|bitrate=i" => sub { undef $preset;
+						undef $altpreset;
+						$bitrate = $_[1]; },
+			 "alt-preset=s" => sub { undef $bitrate;
+						 undef $preset;
+						 $altpreset = $_[1]; },
+			 "preset=s" => sub { undef $bitrate;
+					     undef $altpreset;
+					     $preset = $_[1]; },
+			 "target=s" => \$target,
+			 "test!" => \$test,
+			 "q|quality=i" => \$quality,
+			 "f|fast" => sub { $quality = "fast"; },
+			 "h|high-quality" => sub { $quality = "high"; },
+			 "force!" => \$force,
+			 "debug!" => \$debug,
+			 "help!" => sub {
+			    use Pod::Usage;
+			    pod2usage (-verbose => 1, -exitval => 0); },
+			 "mp3!" => sub { $output_type = "mp3"; },
+			 "ogg!" => sub { $output_type = "ogg"; },
+			 "version!" => sub { version(); exit (0); });
+
+if ($retval == 0 or not scalar @ARGV) {
+   use Pod::Usage;
+   pod2usage (-verbose => 1, -exitval => 1);
+}
+
+my %EXES;
+
+my %URLS = ( "shorten" => "http://etree.org/shnutils/shorten/",
+	     "flac" => "http://flac.sourceforge.net/",
+	     "mpg123" => "http://www.mpg123.de/",
+	     "oggenc" => "http://www.vorbis.com/",
+	     "lame" => "http://lame.sourceforge.net/");
+
+my %DECODER = ( "shn" => "shorten -x %FILE% -",
+		"flac" => "flac -d -c --totally-silent " .
+		"--apply-replaygain-which-is-not-lossless %FILE%",
+		"mp3" => "mpg123 -q -s %FILE%",
+		"ogg" => "oggdec -q -o - %FILE%");
+
+my %ENCODER = ( "mp3" => ("lame " .
+			  (defined $preset ?
+			   "--preset %PRESET% " :
+			   defined $altpreset ?
+			   "--alt-preset %ALTPRESET% " :
+			   "-b %BITRATE% -q %QUALITY% ") .
+			  "--add-id3v2 --pad-id3v2 " .
+			  "--ta %ARTIST% --tl %ALBUM% --tt %TITLE% " .
+			  "--tc %COMMENT% --ty %YEAR% --tn %TRACK% " .
+			  "%ENCODEROPTS% - %OUTFILE%" ),
+		"ogg" => ("oggenc -b %BITRATE% -q %QUALITY% " .
+			  "-a %ARTIST% -l %ALBUM% -t %TITLE% -N %TRACK% " .
+			  "-c %COMMENT% -d %YEAR% " .
+			  "-o %OUTFILE% %ENCODEROPTS% -")
+	      );
+
+# version - print version info
+sub version {
+   my $encoder = $output_type eq "mp3" ? "lame" : "oggenc";
+   my $encoderversion = `$encoder --version | head -1`;
+   chomp $encoderversion;
+
+   print <<EOF
+$progname version $version using $encoderversion
+
+Copyright 2005, Caleb Epstein
+
+Copying and modification permitted only under the terms of the Perl
+Artistic License, the text of which is available at <URL:
+http://www.perl.com/language/misc/Artistic.html>
+
+EOF
+  ;
+}
+
+# findexe - find a binary in the PATH
+sub findexe {
+   my $command = shift;
+   my ($exe, $rest) = split (/ /, $command, 2);
+
+   return $EXES{$exe} if exists $EXES{$exe};
+
+   my $fullpath;
+
+   $fullpath = $exe if $exe =~ m@^/@ and -x $exe;
+
+   if (not defined $fullpath) {
+      my @PATH = File::Spec->path();
+      foreach my $dir (@PATH) {
+	 if (-x "$dir/$exe") {
+	    $fullpath = "$dir/$exe";
+	    last;
+	 }
+      }
+   }
+
+   if (not defined $fullpath) {
+      die "Unable to find `$exe' in your PATH." .
+	(exists $URLS{$exe} ? "  Try $URLS{$exe}" : "") . "\n";
+   }
+
+   $EXES{$exe} = $fullpath;
+}
+
+sub mkdir_p {
+   my $dir = shift;
+   my @D = split /\//, $dir;
+
+   foreach my $i (0 .. $#D) {
+      my $path = join ("/", @D[0..$i]);
+      next unless length $path;
+      if (not -d $path) {
+	 mkdir ($path, 0777) or warn "mkdir $path: $!";
+      }
+   }
+}
+
+sub outputdir {
+   my $dir = shift;
+
+   # On Cygwin, LAME might not be compiled w/Cygwin and as such might
+   # not work with paths like /c/mp3 etc.  Use a relative path
+   # instead.
+   my $outputdir = "$target/" . basename ($dir);
+   $outputdir =~ s/(\.(shnf?|flac\d{0,2}f?|oggf?|mp3f?))?$/.${output_type}f/i;
+   $outputdir;
+}
+
+sub lossless_to_lossy {
+   my $info = shift;
+   my $file = shift;
+   my $song = shift;
+   my $index = shift;
+
+   my $shndir = $info->{"Directory"};
+   my $outputdir = outputdir ($shndir);
+
+   mkdir_p $outputdir unless $test or -d $outputdir;
+
+   my $audioext = join ("|", @AUDIOEXT);
+   my $outfile = "$outputdir/" . basename $file;
+   $outfile =~ s/(\.wav)?\.($audioext)$/.$output_type/i;
+
+   my $artist = $info->artist || "Unknown";
+   my $album = $info->date || "Unknown";
+   my ($disc, $track) = ($song->{Disc}, $song->{Track});
+   $track = $index + 1;
+   my $howmany = $info->num_tracks;
+   if (not $howmany) {
+      $howmany = $info->files ("shn") + $info->files ("flac");
+   }
+   my $n_of_m = sprintf (($howmany > 99 ? "%3d/%3d" : "%2d/%2d"), $index + 1,
+			 $howmany);
+   my $title = $song->{Title} || "";
+   if (not length $title) {
+      $title = sprintf (($howmany > 99
+			 ? "Track %03d of %03d"
+			 : "Track %02d of %02d"),
+			$track, $howmany);
+   }
+
+   if ($howmany > 256 and defined $info->num_discs and $info->num_discs > 1) {
+      $album .= " (Disc $disc of " . $info->num_discs . ")";
+   }
+   if ($info->venue) {
+      $album .= " " . $info->venue;
+   }
+
+   my $year = $info->year;
+   my $comment = $info->source || "Encoded by $progname";
+   my $tracktime = $song->{Time} || shnlen ($file) || "0:00";
+   my $tracksecs = parsetime ($tracktime);
+
+   my $input_type = extension ($file);
+
+   if (not exists $DECODER{$input_type}) {
+      warn "$progname: Don't know how to decode \U$input_type\E " .
+	"input file $file\n";
+      return 0;
+   }
+
+   my $decoder = $DECODER{$input_type};
+   my $encoder = $ENCODER{$output_type};
+
+   if ($quality eq "fast") {
+      $quality = $output_type eq "mp3" ? 7 : 2;
+   } elsif ($quality eq "high") {
+      $quality = $output_type eq "mp3" ? 2 : 7;
+   }
+
+   if ($^O eq "cygwin") {
+      $file = `cygpath -m \Q$file\E`;
+      $outfile = `cygpath -m \Q$outfile\E`;
+      chomp $file;
+      chomp $outfile;
+   }
+
+   $decoder =~ s/%FILE%/\Q$file\E/g;
+   $encoder =~ s/%QUALITY%/$quality/g;
+   $encoder =~ s/%BITRATE%/$bitrate/g if defined $bitrate;
+   $encoder =~ s/%ALTPRESET%/$altpreset/g if defined $altpreset;
+   $encoder =~ s/%PRESET%/$preset/g if defined $preset;
+   $encoder =~ s/%ARTIST%/\Q$artist\E/g;
+   $encoder =~ s/%ALBUM%/\Q$album\E/g;
+   $encoder =~ s/%TITLE%/\Q$title\E/g;
+   $encoder =~ s/%COMMENT%/\Q$comment\E/g;
+   $encoder =~ s/%YEAR%/\Q$year\E/g;
+   $encoder =~ s/%TRACK%/\Q$track\E/g;
+   $encoder =~ s/%ENCODEROPTS%/$encoderopts/g;
+   $encoder =~ s/%OUTFILE%/\Q$outfile\E/g;
+
+   findexe ($decoder) or die;
+   findexe ($encoder) or die;
+
+   my $cmd = "$decoder | $encoder " . ($debug ? "" : " > /dev/null 2>&1");
+
+   my $skip = (-f $outfile and -M $outfile < -M $file and not $force);
+
+   print sprintf ("%7.7s %5.5s ", $n_of_m, $tracktime) .
+     linewrap ($title, "", " " x 14) . "\n";
+
+   print "Command line: $cmd\n" if $debug or $test;
+
+   my $status = 0;
+   my $start = time;
+
+   if (not $test and not $skip) {
+      $status = system ($cmd);
+   }
+
+   if ($status != 0) {
+      unlink $outfile;		# Don't keep around a potentially short file
+
+      my $signal = $status & 127;
+      my $core = $status & 128;
+      $status >>= 8;
+      warn "Error encoding $file, exit status $status" .
+	($signal ? " on signal $signal" : "") .
+	  ($core ? " (dumped core)" : "") . "\n";
+
+      if ($signal) {
+	 print "Exiting.\n";
+	 exit $signal;
+      }
+   } elsif (not $test) {
+      my $finish = time;
+      my $encodetime = $finish - $start;
+
+      print " " x 14;
+      if ($tracksecs and $encodetime) {
+	 printf "Encode speed %.1fx", $tracksecs / $encodetime;
+      } else {
+	 printf "File size %s", bytes_to_human (-s $outfile);
+	 if ($skip) {
+	    print ", created " .
+	      strftime ("%m/%d/%y %H:%M", localtime ((stat $outfile)[10]));
+	 }
+      }
+      print "\n";
+   }
+
+   1;
+}
+
+foreach my $dir (map { File::Spec->rel2abs ($_) } @ARGV) {
+   if (not -d $dir) {
+      warn "$dir: not a directory\n";
+      next;
+   }
+
+   my $info = new Etree::InfoFile (Directory => $dir,
+				   Debug => $debug) or die;
+
+   $info->parse;
+
+   chdir ($dir) or die "Couldn't change directory to $dir: $!\n";
+
+   print "Etree::InfoFile dump:\n", Dumper ($info), "\n" if $debug;
+
+   my $source = $info->source || "Unknown";
+
+   if (length $source > 256) {
+      $source = substr ($source, 0, 256) . " ...";
+   }
+
+   print
+     "=" x 79 . "\n" .
+     " Directory: $dir\n" .
+     " Info File: $info->{InfoFile}\n" .
+     "Output Dir: " . outputdir ($dir) . "\n" .
+     "      Band: " . ($info->{Band} || "Unknown") . "\n" .
+     "      Date: " . linewrap ($info->date || "Unknown") . "\n" .
+     "     Venue: " . linewrap ($info->venue || "Unknown") . "\n" .
+     "    Source: " . linewrap ($source) . "\n\n" .
+     " Track  Time  Title / Comments\n" .
+     "------- ----- ----------------\n";
+
+   # Copy the info file
+   if (not $test and exists $info->{"InfoFile"}) {
+      my $source = $info->{"InfoFile"};
+      my $dest = outputdir ($dir) . "/" . basename ($source);
+      mkdir_p (outputdir ($dir));
+      if (not -f $dest or -M $source < -M $dest or $force) {
+	 copy ($source, $dest);
+      }
+   }
+
+   # Encode the files
+   my @FILES = ($info->files ("flac"), $info->files ("shn"));
+   my @SONGS = $info->songs;
+
+   foreach my $index (0 .. $#FILES) {
+      my $song;
+      if ($index < scalar @SONGS) {
+	 $song = $SONGS[$index];
+      } else {
+	 $song = { Disc => 1, Track => 1 + $index, Title => "" };
+      }
+      lossless_to_lossy ($info, $FILES[$index], $song, $index)
+	or die "Error converting $FILES[$index] to $output_type\n";
+   }
+
+   print "\n" . "=" x 79 . "\n";
+}
+
+__END__
+
+=head1 NAME
+
+shn2mp3 - Convert audio files to lossily-compressed MP3 or OGG files
+with tags.
+
+=head1 SYNOPSIS
+
+shn2mp3 [options] directory [directory ...]
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--help>
+
+Generate this usage message and exit.
+
+=item B<-b> | B<--bitrate> I<n>
+
+Specify a constant bit-rate (CBR) encoding in kbits/second.  This
+overrides B<--preset> and B<--alt-preset>.  The default value is 192.
+
+=item B<-q> | B<--quality> I<n>
+
+Specify the encoding quality when using CBR encoding mode.  The
+meaning of this number depends on the encoder being used.  For the
+L<lame> encoder, it is a number from 0 to 9 with 0 being the highest
+quality and 9 being the lowest.  For the L<oggenc> encoder, it is a
+number from -1 to 10 with -1 being the lowest and 10 being the
+highest.
+
+=item B<--alt-preset> I<standard|extreme|insane|...>
+
+When using L<lame>, specify an --alt-preset VBR encoding method.  The
+default encoding method uses --alt-preset standard.  Note: alt-presets
+are deprecated in favor of the presets.
+
+=item B<--preset> I<standard|extreme|insane|...>
+
+When using L<lame>, specify a --preset VBR encoding method.  This
+overrides --alt-preset and --bitrate.  See the output of C<lame
+--preset help> for a list of valid presets.
+
+=item B<--target> I<directory>
+
+Specify the base output directory where the output files will be
+written.  The ultimate output directory will be a subdirectory of this
+directory whose name is taken from the basename of the source
+directory with ".mp3f" added to the end.  For example the output
+directory for ph2004-01-01.shnf is I<target>/ph2004-01-01.mp3f
+
+=item B<--force>
+
+By default, any pre-existing MP3/OGG files will not be overwritten by
+L<shn2mp3>.  This flag will cause existing files to be replaced.
+
+=item B<--test>
+
+Don't actually do the encoding, just print what would be done.  Useful
+to verify that the info file has been parsed correctly.
+
+=item B<--mp3>
+
+Force MP3 output using L<lame>.  This is the default if the script is
+invoked as C<shn2mp3>.
+
+=item B<--ogg>
+
+Force OGG Vorbis output using L<oggenc>.  This is the default if the
+script is invoked as C<shn2ogg>.
+
+=back
+
+=head1 DESCRIPTION
+
+The purpose of L<shn2mp3> is to convert audio files from a
+losslessly-compressed format like L<shorten> or L<flac> to
+lossily-compressed MP3 or OGG files with tags.
+
+In actuality, L<shn2mp3> can handle input files in L<shorten>,
+L<flac>, L<ogg> and L<mp3> formats.  As a result, its name should
+probably be L<lossify>.
+
+For each directory supplied by the user, L<shn2mp3> will do the
+following:
+
+=over
+
+=item Parse
+
+The directory is processed by the L<Etree::InfoFile> module, which
+searches for audio and text files.  Text files are parsed for the name
+of the artist, venue, date, song names, recording source, and other
+information.  This information is used for tagging the resulting
+output files.
+
+If no text files can be found, an error is emitted and the directory is
+not processed.
+
+=item Transcode
+
+Each audio file is run through a transcoding pipeline which converts
+the source file to WAVE format and then takes that WAVE audio and
+compresses it to MP3 or OGG Vorbis format.  The files are tagged with
+the information found by the L<Etree::InfoFile> module.
+
+=back
+
+=head1 VERSION
+
+$Id: shn2mp3 142 2005-07-22 15:31:23Z cepstein $
+
+=head1 SEE ALSO
+
+L<shorten>, L<flac>, L<lame>, L<oggenc>, L<shntool>,
+L<Etree::InfoFile>, L<flacify>
+
+=head1 AUTHOR
+
+Caleb Epstein E<lt>cae at bklyn dot orgE<gt>

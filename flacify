@@ -1,0 +1,831 @@
+#!/usr/bin/perl -w
+#
+# flacify - Convert an etree-compliant directory of SHN (or FLAC)
+# files into a well-tagged set of FLAC files.
+#
+# $Id: flacify 148 2007-07-24 00:15:48Z cepstein $
+
+use strict;
+use File::Basename;
+use File::Spec;
+use File::Find;
+use lib dirname $0;
+use Etree::InfoFile;		# Text file parsing classes
+use Getopt::Long;
+use File::Copy;
+use Data::Dumper;
+use File::Spec;
+use Cwd;
+use POSIX qw(strftime);
+use Text::Wrap;
+
+my $progname = basename $0;
+my $rcsid = q$Id: flacify 148 2007-07-24 00:15:48Z cepstein $;
+(my $version = q$Revision: 148 $) =~ s/^Revision:\s+([\d\.]+)\s.*/$1/;
+my $debug = 0;
+my $dryrun = 0;
+my $tagdiscs = 0;
+my $replay_gain = 1;
+my $logfile;
+
+my %EXES = ("unshn" => undef,
+	    "flac" => undef,
+	    "metaflac" => undef);
+
+my %TAGFORMAT = ("ARTIST" => "ARTIST",
+		 "ALBUM" => "ALBUM",
+		 "DATE" => "DATE",
+		 "LOCATION" => "LOCATION",
+		 "SOURCEMEDIA" => "SOURCEMEDIA",
+		 "DISCNUMBER" => "DISCNUMBER",
+		 "TRACKNUMBER" => "TRACKNUMBER",
+		 "TITLE" => "TITLE",
+		 "COMMENT" => "COMMENT");
+
+# On Windows, add the FLAC install dir to the PATH
+if ($^O eq "MSWin32") {		# Active State
+   $ENV{"PATH"} .= ';c:\Program Files\FLAC'
+     if -d 'c:\Program Files\FLAC';
+} elsif ($^O eq "cygwin") {	# Cygwin
+   $ENV{"PATH"} .= ':/c/Program Files/FLAC'
+     if -d '/c/Program Files/FLAC';
+}
+
+# Ensure all the binaries we need are in our PATH
+foreach my $exe (keys %EXES) {
+   $EXES{$exe} = findexe ($exe)
+     or die "Can't find the required program `$exe' in your PATH\n";
+}
+
+GetOptions ("debug!" => \$debug,
+	    "discs!" => \$tagdiscs,
+	    "dry-run!" => \$dryrun,
+	    "help!" => sub { exit system ("perldoc", $0) },
+	    "version!" => sub { version (); exit (0) },
+	    "replay-gain!" => \$replay_gain,
+	    "tag=s%" => \%TAGFORMAT,
+	    "log=s" => \$logfile);
+
+if (defined $logfile) {
+   open (STDOUT, ">> $logfile")
+     or die "$progname: can't send output to $logfile: $!\n";
+   open (STDERR, ">& STDOUT")
+     or die "$progname: can't send errors to $logfile: $!\n";
+
+   select STDERR; $| = 1;
+   select STDOUT; $| = 1;
+}
+
+sub logmsg {
+   my $prio = "INFO";
+
+   if ($_[0] =~ m/^(warn|debug|error|info|dryrun)$/i) {
+      $prio = shift @_;
+   }
+
+   $prio = uc $prio;
+
+   return if $prio eq "DEBUG" and not $debug;
+
+   print strftime ("%b %d %H:%M:%S: $prio: ", localtime), "@_\n";
+}
+
+# version - print version info
+sub version {
+   my $flacver = `$EXES{flac} --version`;
+   chomp $flacver;
+
+   print <<EOF
+$progname version $version using $flacver
+
+Copyright 2005, Caleb Epstein
+
+Copying and modification permitted only under the terms of the Perl
+Artistic License, the text of which is available at <URL:
+http://www.perl.com/language/misc/Artistic.html>
+
+EOF
+  ;
+}
+
+# findexe - find a binary in the PATH
+sub findexe {
+   my $exe = shift;
+   my $fullpath;
+
+   $fullpath = $exe if $exe =~ m@^/@ and -x $exe;
+
+   if (not defined $fullpath) {
+      my @PATH = File::Spec->path();
+      foreach my $dir (@PATH) {
+	 if (-x "$dir/$exe") {
+	    $fullpath = "$dir/$exe";
+	    last;
+	 }
+      }
+   }
+
+   $fullpath;
+}
+
+# Sort helpers
+sub numeric { $a <=> $b }
+
+sub setlist_order {
+   if (not defined $a) {
+      return defined $b ? 1 : 0;
+   } elsif (not defined $b) {
+      return defined $a ? -1 : 0;
+   } elsif ($a =~ /^\d+$/ and $b =~ /^\d+$/) {
+      return $a <=> $b;
+   } elsif ($a eq "E") {
+      return 1;
+   } elsif ($b eq "E") {
+      return -1;
+   }
+   return 0;
+}
+
+sub run_command {
+   my @COMMAND = @_;
+
+   $COMMAND[0] = $EXES{$COMMAND[0]};
+
+   if ($dryrun) {
+      logmsg ("DRYRUN", join (" ",
+			      map { $_ =~ m/[\s[:punct:]]/ ? "'$_'" : $_ }
+			      @COMMAND));
+      return 0;
+   }
+
+   my $retval = system (@COMMAND);
+
+   if ($retval != 0) {
+      my $signal = $retval & 127;
+      my $core = $retval & 128;
+      my $status = $retval >> 8;
+
+      warn "Error: $COMMAND[0] exited with status $status" .
+	($signal ? " on signal $signal" : "") .
+	  ($core ? " (dumped core)" : "") . "\n";
+
+      return $status || $core || $signal;
+   }
+
+   0;
+}
+
+# convert_files - do the real work
+sub convert_files {
+   my $info = shift;
+   my $songs = shift;
+   my $files = shift;
+   my $dir = $info->{Directory};
+
+   chdir ($dir) or die "Couldn't change directory to $dir: $!\n";
+
+   # 1. SHN -> WAV
+   my @SHNS = grep { /\.shn$/i } @$files;
+
+   if (scalar @SHNS) {
+      # Ensure filenames are unique because we will flatten the dirs
+      my @DUPS;
+      my %UNIQ;
+
+      foreach my $file (@SHNS) {
+	 my $base = basename $file;
+	 if (exists $UNIQ{$base}) {
+	    push (@DUPS, $file);
+	 }
+	 $UNIQ{$base}++;
+      }
+
+      if (scalar @DUPS) {
+	 die "One or more filenames are not unique:\n" .
+	   join ("\n\t", @DUPS) . "\n";
+      }
+
+      logmsg ("Extracting SHN to WAV");
+
+      my $status = run_command ("unshn", @SHNS);
+
+      die "Error unpacking SHN files\n" unless $status == 0 or $status == 2;
+   }
+
+   logmsg ("DEBUG", "SHN files:\n\t" . join ("\n\t", @SHNS));
+
+   # 2. WAV -> FLAC
+   my @WAVS = map {
+      # WAV file will be created in ouur CWD
+      (my $file = basename $_) =~ s/\.shn$/.wav/i;
+      die "WAV file $file missing\n"
+	unless -f $file or $dryrun;
+      $file } @SHNS;
+
+   # Also add in any WAV files from the start
+   push (@WAVS, grep { /\.wav$/i } @$files);
+
+   logmsg ("DEBUG", "WAV files:\n\t" . join ("\n\t", @WAVS));
+
+   if (scalar @WAVS) {
+      logmsg ("Converting WAV files to FLAC");
+
+      # In order to do proper CD sector alignment, we want to group files
+      # by set
+      my %GROUPS;
+      my $groupby = "Set";
+
+      map {
+	 my $set = exists $_->{Set} ? $_->{Set} : 0;
+	 $GROUPS{$set}->{$_->{Index}} = $_;
+      } grep { defined and exists $_->{Index} } @$songs;
+
+      # If we dopn't have any set info, group files by disc instead
+      if (scalar keys %GROUPS <= 1 and exists $GROUPS{0}) {
+	 logmsg ("No set information.  Grouping by disc.");
+	 undef %GROUPS;
+	 $groupby = "Disc";
+	 foreach my $disc (1 .. $info->num_discs) {
+	    map { $GROUPS{$disc}{$_->{Index}} = $_ }
+	      grep { defined and $_->{Disc} == $disc } @$songs;
+	 }
+      }
+
+      if (not scalar keys %GROUPS) {
+	 $groupby = "Files";
+	 map { $GROUPS{1}{$_} = undef; } 0 .. $#$files;
+      }
+
+      logmsg ("DEBUG", "Groups (by $groupby):\n", Dumper (\%GROUPS));
+
+      # Reverse the mapping from group -> files to file -> group
+      my %INDEX_GROUP;
+
+      foreach my $group (keys %GROUPS) {
+	 # Get the list of file indexes
+	 my @BATCH = keys %{$GROUPS{$group}};
+	 # Map from index -> group
+	 map { $INDEX_GROUP{$_} = $group } @BATCH;
+      }
+
+      logmsg ("DEBUG", "Index groups:\n", Dumper (\%INDEX_GROUP));
+
+      foreach my $group (sort setlist_order keys (%GROUPS)) {
+	 my @BATCH = sort numeric keys %{$GROUPS{$group}};
+
+	 logmsg ("DEBUG", "Batch $group: @BATCH");
+
+	 my @FILES = map { $WAVS[$_] } grep { $_ <= $#WAVS } @BATCH;
+
+	 logmsg ("DEBUG", "Files for batch $group: @FILES");
+
+	 next unless scalar @FILES;
+
+	 logmsg ("Converting $groupby $group from WAV to FLAC, " .
+		 scalar (@FILES) . " files:\n\t" .
+		 join ("\n\t", map { basename $_ } @FILES));
+
+	 # Compress the WAV files to FLAC files, deleting as we go.
+	 # Ensure CD sector alignment
+	 my @CMD = ("flac", "--sector-align", "--delete-input-file");
+
+	 if ($replay_gain) {
+	    push (@CMD, "--replay-gain");
+	 }
+
+	 my $status = run_command (@CMD, @FILES);
+
+	 if ($status != 0) {
+	    # Remove any FLACs we created
+	    foreach my $file (@FILES) {
+	       (my $flac = $file) =~ s/\.wav$/.flac/i;
+	       unlink $flac if -e $flac;
+	    }
+	    die "Error encoding FLAC files\n";
+	 }
+
+	 logmsg ("$groupby $group encoding complete");
+      }
+   }
+
+   # 3. Tag FLAC files
+   my @FLACS = grep { /\.flac$/i } @$files;
+
+   push (@FLACS, map {
+      (my $file = basename $_) =~ s/\.wav$/.flac/i;
+      die "FLAC file $file missing\n" unless -f $file or $dryrun;
+      die "FLAC file $file empty (disk full?)\n"
+	unless -s $file or $dryrun;
+      $file } @WAVS);
+
+   @FLACS = sort { basename ($a) cmp basename ($b) } @FLACS;
+
+   die "Number of FLAC files (" . scalar (@FLACS) . ") does not match " .
+     "number of songs (" . scalar (@$songs) . ")\n"
+       unless scalar @FLACS == scalar @$songs;
+
+   logmsg ("DEBUG", "FLAC files:\n\t", join ("\n\t", @FLACS));
+
+   logmsg ("Tagging files");
+
+   tag_files ($info, $songs, \@FLACS) or die "Error tagging files\n";
+
+   # If we have pre-existing FLAC files, make sure they have Replay
+   # Gain tags
+   if ($replay_gain and not scalar @SHNS) {
+      replay_gain (@FLACS) or die "Error calculating ReplayGain\n";
+   }
+
+   logmsg ("Removing original SHN files") if scalar @SHNS;
+
+   my $howmany = ($dryrun ? scalar (@SHNS) : unlink (@SHNS));
+
+   if ($howmany != scalar @SHNS) {
+      die "Removed only $howmany SHN files, expected " .
+	scalar (@SHNS) . "\n";
+   }
+
+   # Determine if FFP file is needed
+   if (not $dryrun) {
+      my @TXT;
+
+      # Find all TXT or FFP files
+      find (sub {
+	       push (@TXT, $File::Find::name) if /\.(txt|ffp)/
+	    }, $dir);
+
+      # Determine if any of these contains FLAC fingerprints already.
+      # If so we will do nothing.
+      my $have_ffp = 0;
+
+      FFPS: foreach my $ffp (@TXT) {
+	 open (FILE, $ffp) or next;
+	 while (<FILE>) {
+	    if (/^\s*(.+):([\da-f]{32})\s*$/ and $1 =~ /\.flac$/) {
+	       logmsg ("Found existing FLAC fingerprints in $ffp");
+	       $have_ffp = 1;
+	       last FFPS;
+	    }
+	 }
+	 close FILE;
+      }
+
+      if (not $have_ffp) {
+	 logmsg ("Creating FLAC fingerprint file ffp.txt");
+
+	 open (METAFLAC, "$EXES{metaflac} --show-md5sum --with-filename " .
+	       join (" ", map { quotemeta $_ } @FLACS) . "|")
+	   or die "Unable to open pipe from metaflac: $!\n";
+
+	 open (FFP, "> ffp.txt") or die "Unable to write ffp.txt: $!\n";
+
+	 print FFP "FLAC fingerprints generated by $progname $version at " .
+	   scalar (localtime) . "\n\n";
+
+	 while (<METAFLAC>) {
+	    print FFP $_;
+	 }
+
+	 close METAFLAC;
+	 close FFP;
+      }
+   }
+
+   # Rename original MD5 files
+   my @MD5S = $info->files ("md5");
+
+   if (scalar @MD5S) {
+      logmsg ("Renaming MD5 files:");
+
+      foreach my $file (@MD5S) {
+	 (my $newname = $dir . "/" . basename ($file)) =~ s/$/.orig/;
+	 logmsg ("\t$file -> $newname");
+	 if (not $dryrun) {
+	    rename ($file, $newname)
+	      or die "Rename failed: $!\n";
+	 }
+      }
+   }
+
+   # Remove old .skt files
+   my @SKTS = $info->files ("skt");
+
+   if (scalar @SKTS) {
+      logmsg ("Removing Shorten v3 seek-table files:");
+
+      foreach my $file (@SKTS) {
+	 logmsg ("\t$file");
+	 if (not $dryrun) {
+	    unlink ($file) or die "Unable to remove $file: $!\n";
+	 }
+      }
+   }
+
+   # Remove empty subdirs
+   if (not $dryrun) {
+      logmsg ("Removing empty subdirectories");
+      local $File::Find::dont_use_nlink = 1;
+      finddepth (sub { rmdir if -d }, $dir);
+   }
+
+   logmsg ("Done processing $dir");
+
+   1;
+}
+
+sub tag_files {
+   my $info = shift;
+   my $songs = shift;
+   my $files = shift;
+
+   # FLAC tags taken from
+   # http://reactor-core.org/ogg-tag-recommendations.html
+   my %VALUES;
+
+   $VALUES{"ARTIST"} = $info->artist if $info->artist;
+   $VALUES{"ALBUM"} = $info->album if $info->album;
+   $VALUES{"DATE"} = $info->year if $info->year;
+   $VALUES{"LOCATION"} = $info->venue if $info->venue;
+   $VALUES{"SOURCEMEDIA"} = $info->source if $info->source;
+
+   foreach my $index (0 .. $#$files) {
+      my $song = ref ($songs) ? $songs->[$index] : undef;
+
+      delete $VALUES{"DISCNUMBER"};
+      delete $VALUES{"TRACKNUMBER"};
+      delete $VALUES{"TITLE"};
+      delete $VALUES{"COMMENT"};
+
+      # If running in --discs mode, tag files with DISCNUMBER and
+      # TRACKNUMBER.  Not all applications/devices honor the
+      # DISCNUMBER tag though, so this may leave you with all of your
+      # Track 1's sorting before all of your Track 2's.
+      if (defined $song and $tagdiscs) {
+	 $VALUES{"DISCNUMBER"} = $song->{Disc} if $song->{Disc};
+	 $VALUES{"TRACKNUMBER"} = $song->{Track} || ($index + 1);
+      } else {
+	 $VALUES{"DISCNUMBER"} = undef;
+	 $VALUES{"TRACKNUMBER"} = $index + 1;
+      }
+
+      $VALUES{"TITLE"} = $song->{Title} if defined $song and $song->{Title};
+
+      # Mark song as having a segue
+      if (exists $song->{Segue}) {
+	 $VALUES{"TITLE"} .= " >";
+      }
+
+      my $note;
+      $note = $song->{Notes} if defined $song and exists $song->{Notes};
+
+      if (defined $note and exists $info->{Notes}{$note}) {
+	 $VALUES{"COMMENT"} = $info->{Notes}{$note};
+      } else {
+	 $VALUES{"COMMENT"} = undef;
+      }
+
+      my %TAGS = %TAGFORMAT;
+
+      foreach my $tag (keys %TAGS) {
+	 my $format = $TAGS{$tag};
+	 foreach my $key (keys %VALUES) {
+	    my $value = $VALUES{$key} || "";
+	    $format =~ s/\b$key\b/$value/g;
+	 }
+	 if (length $format and $format ne $TAGS{$tag}) {
+	    $TAGS{$tag} = $format;
+	 } else {
+	    delete $TAGS{$tag};
+	 }
+      }
+
+      print "" . sprintf ("%2d/%2d", $index + 1, $#$files + 1) . ": " .
+	($TAGS{TITLE} || "") .
+	  (exists $TAGS{COMMENT} ? " ($TAGS{COMMENT})" : "") . "\n";
+
+      my @TAGS;
+      foreach my $tag (keys %TAGS) {
+	 my $value = $TAGS{$tag};
+	 push (@TAGS, "--remove-tag=$tag");
+	 if (defined $value) {
+	    $value =~ s@\r?\n@ // @g;
+	    push (@TAGS, "--set-tag=$tag=$value");
+	 }
+      }
+      my @CMD = ("metaflac", @TAGS, $files->[$index]);
+
+      my $status = run_command (@CMD);
+
+      if ($status != 0) {
+	 warn "Error setting tags on $files->[$index]\n";
+	 return 0;
+      }
+   }
+
+   print "\n";
+
+   1;
+}
+
+sub replay_gain {
+   my @FILES = @_;
+
+   return 1 unless $replay_gain;
+
+   if (not open (METAFLAC, "$EXES{metaflac} --list " .
+		 "--block-type=VORBIS_COMMENT \Q$FILES[0]\E|")) {
+      warn "Unable to read VORBIS_COMMENT block from $FILES[0] " .
+	"to check for ReplayGain tags\n";
+      return 0;
+   }
+
+   my $need = 1;
+
+   while (<METAFLAC>) {
+      $need = 0 if /REPLAYGAIN/;
+   }
+
+   close METAFLAC;
+
+   return 1 unless $need;
+
+   logmsg ("Adding ReplayGain information to FLACs (this may take a while)");
+
+   my @CMD = ("metaflac", "--add-replay-gain", @FILES);
+
+   my $status = run_command (@CMD);
+
+   if ($status != 0) {
+      warn "Error adding ReplayGain tags to FLAC files\n";
+      return 0;
+   }
+
+   logmsg ("Done with ReplayGain");
+
+   return 1;
+}
+
+# Operate on CWD if nothing is specified
+if (not scalar @ARGV) { push (@ARGV, "."); }
+
+foreach my $dir (map { File::Spec->rel2abs ($_) } @ARGV) {
+   if (not -d $dir) {
+      warn "$dir: not a directory\n";
+      next;
+   }
+
+   my $info = new Etree::InfoFile (Directory => $dir,
+				   Debug => $debug) or die;
+
+   $info->parse;
+
+   print "=" x 79 . "\n";
+
+   logmsg ("Processing directory $dir");
+
+   logmsg ("DEBUG", "Etree::InfoFile dump:\n" . Dumper ($info));
+
+   # Wrap long lines nicely
+   sub linewrap {
+      local ($Text::Wrap::columns) = 65;
+      Text::Wrap::wrap ('', '        ', shift);
+   }
+
+   print
+     "   Dir: ", linewrap ($dir), "\n",
+     "Artist: ", linewrap ($info->artist || "Unknown"), "\n",
+     "  Date: ", linewrap ($info->date || "Unknown"), "\n",
+     " Venue: ", linewrap ($info->venue || "Unknown"), "\n",
+     "Source: ", linewrap ($info->source || "Unknown"), "\n",
+     "\n";
+
+   # Get the list of all possible audio files we will convert
+   my @FILES = sort { $a cmp $b } $info->files ("flac"),
+     $info->files ("wav"), $info->files ("shn");
+
+   if (not scalar @FILES) {
+      logmsg ("WARN", "No appropriate audio files found.  Skipping $dir");
+      next;
+   }
+
+   my @SONGS = $info->songs;
+
+   if (scalar @SONGS and scalar @SONGS < scalar @FILES) {
+      logmsg ("WARN", "Number of songs from info file (" . scalar (@SONGS) .
+	      ") doesn't match number of audio files (" . scalar (@FILES) 
+	      . "):");
+      logmsg ("WARN", "Songs:\n\t", join ("\n\t", map { $_->{Title} } @SONGS),
+	      "\nFiles:\n\t", join ("\n\t", map { basename $_ } @FILES));
+      next;
+   }
+
+   # Truncate the song list to match the file list
+   $#SONGS = $#FILES;
+
+   convert_files ($info, \@SONGS, \@FILES) or die "Error converting files\n";
+
+   print "=" x 79 . "\n";
+}
+
+__END__
+
+=head1 NAME
+
+flacify - Create tagged FLAC files
+
+=head1 SYNOPSIS
+
+flacify [OPTIONS] DIRECTORY [DIRECTORY ...]
+
+=head1 DESCRIPTION
+
+The purpose of L<flacify> is to convert audio files from WAVE, Shorten
+or FLAC format into losslessly-compressed, properly tagged FLAC files.
+L<flacify> will convert existing Shorten or WAV audio files to FLAC
+format, and add or update tags on existing FLAC files.
+
+The script is geared towards handling live concert recordings arranged
+according to the standards of L<http://etree.org/>.  The audio files
+should be accompanied by a text file that provides detailed
+information about the artist, date, venue, recording source, and track
+list of the performance.
+
+For each directory the user specifies, L<flacify> performs the
+following steps:
+
+=over
+
+=item B<Parsing>
+
+The directory is processed by the the L<Etree::InfoFile> module, which
+searches for audio and text files in the directory.  Text files are
+parsed for the artist name, venue, date, song titles, recording
+source, and other information.  This information will be used in the
+tagging process.
+
+If no text files can be found, an error is emitted and the directory is
+not processed.
+
+If the input files are already FLAC files, we skip ahead to the
+L<"Tagging"> step.
+
+=item B<Decompression>
+
+Here we uncompress all SHN files to WAV files using the L<unshn>
+script, also from the etree-scripts distribution.  If the input
+consists of only WAV files, this step is skipped.
+
+=item B<Compression>
+
+Any WAV files resulting from the previous step are then compressed
+using the command line L<flac> encoder.  The following options are
+passed to L<flac>: C<--sector-align --delete-input-file --replay-gain>
+The C<--reply-gain> option is omitted if the user passes the
+--noreplay-gain argument to flacify.
+
+=item B<Tagging>
+
+We are now left with only FLAC files.  These are tagged with the
+information from the L<"Parsing"> step.  The tagging uses these fields
+as specified by L<http://www.xiph.org/ogg/vorbis/doc/v-comment.html>:
+
+=over
+
+=item ARTIST
+
+The performer.  Usually taken from the first line of the info file.
+
+=item ALBUM
+
+The date of the performance in YYYY-MM-DD format followed by the venue
+information (e.g. "2003-01-01 Lupo's Hearbreak Hotel - Providence,
+RI")
+
+=item DATE
+
+The year of the performance in YYYY format.
+
+=item LOCATION
+
+The venue where the performance took place.
+
+=item SOURCEMEDIA
+
+The recording source information, if this was found.  Usually contains
+microphone, A/D converter, and recorder information.
+
+=item DISCNUMBER
+
+When run with B<--discs>, this tag will be set for each file.
+Otherwise it will not be set.
+
+=item TRACKNUMBER
+
+Tracks are numbered 1..n on either a per-disc basis or for the entire
+file set.  If the B<--discs> option is specified, TRACKNUMBER will
+correspond to the index of the track within the current disc.  By
+default the TRACKNUMBER will be the index of the track within the
+entire fileset.
+
+=item TITLE
+
+The title of the song.
+
+=item COMMENT
+
+If there are any notes found for a given song, they will be included
+in this tag.
+
+=back
+
+=item B<FFP Creation>
+
+If L<flacify> does not find any text files containing FLAC
+fingerprints, it will create a new file called F<ffp.txt> containing
+the output of C<metaflac --show-md5sum> for all the FLAC files in the
+set.
+
+=item B<MD5 Renaming>
+
+Any existing files in the source directory whose names end in C<.md5>
+will be moved to the top level directory and renamed so they end in
+C<.md5.orig>.
+
+=item B<Directory Pruning>
+
+Any subdirectories left empty after the processing above will be
+removed.
+
+=item B<Directory Renaming>
+
+Finally, the directory is renamed to end in ".flac16".  If the
+directory name previously ended in ".shn" or ".shnf", that suffix is
+removed.
+
+=back
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--help>
+
+Generate this usage message and exit.
+
+=item B<--version>
+
+Print version information and exit.
+
+=item B<--debug>
+
+Turn on debugging mode.  Dumps copious output useful mostly to the
+maintainer.
+
+=item B<--discs>
+
+Keep tracks grouped by CD tracking boundaries and use the Ogg Vorbis
+DISCNUMBER comment field to distinguish one disc from another.  Some
+players do not honor this tag and so will sort track 1 of each disc
+before track 2 of any disc (e.g. playback might run D1T1, D2T1, D1T2,
+...).  The default is to number tracks sequentially from 1 to I<n>
+with no regard to any disc groups.
+
+=item B<--dry-run>
+
+Print what commands would be run, but don't run them.
+
+=item B<--noreplay-gain>
+
+Disable the Replay Gain calculations when creating new FLAC files or
+updating existing FLAC files.
+
+=item B<--tag> B<TAG>=B<FORMAT>
+
+Specify the formatting for the tags written to the FLAC files, or add
+your own user-defined tags.  The default format for all of the
+available tags is just themselves (e.g. DATE=DATE, COMMENT=COMMENT).
+You can change the formatting by specifying something different.  For
+exmaple, if you wanted the track title tags to include the date, you
+could specify --tag "TITLE=DATE TITLE".  You could add your own tag to
+all files by --tag MYTAG=MYVALUE.
+
+See the section on L<Tagging> below for a list of all the standard
+tags which are used by flacify.
+
+=item B<--log> filename
+
+Redirect all output messages to this file.  Helpful for debugging.
+
+=back
+
+=head1 VERSION
+
+$Id: flacify 148 2007-07-24 00:15:48Z cepstein $
+
+=head1 SEE ALSO
+
+L<unshn>, L<shorten>, L<flac>, L<metaflac>, L<Etree::InfoFile>
+
+=head1 AUTHOR
+
+Caleb Epstein E<lt>cae at bklyn dot orgE<gt>

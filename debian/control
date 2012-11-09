@@ -1,0 +1,24 @@
+Source: etree-scripts
+Section: sound
+Priority: optional
+Build-Depends: debhelper (>= 4.0.2)
+Build-Depends-Indep: perl (>= 5.8.0-7)
+Maintainer: Caleb Epstein <cae@bklyn.org>
+Standards-Version: 3.6.1
+
+Package: etree-scripts
+Architecture: all
+Depends: ${perl:Depends}, libdigest-md5-perl, libtimedate-perl, libaudio-wav-perl, libhtml-parser-perl
+Recommends: shorten, shntool, flac, cdrecord, lame
+Description: Useful scripts for handling lossless audio files.
+ Contains a number of handy utility scripts for dealing with
+ losslessly-compressed audio files (e.g. SHN and FLAC files).  Including:
+ md5check - recursively check md5sums on a directory tree
+ shn2mp3 - Convert a directory of SHN/FLAC files to nicely-tagged MP3/OGGs
+ flacify - Convert a directory of WAV/SHN/FLAC files to tagged FLACs.
+ unshn - Unpack a group of SHN or FLAC files.
+ burn-shns - Wrapper for unshn and cdrecord.  Used to un-SHN files and burn.
+ cdfill - Calculate optimal CD-filling for a set of SHN files and optionally
+          rename them with disc and track indicators.
+ make-toc - Create a cdrdao TOC file from a directory of WAV files.
+ makehbx - Create a XML file with information about a directory of SHN files.

@@ -1,0 +1,27 @@
+#!/bin/sh
+#
+# burn-shns
+#
+# Take a directory of SHN/FLAC files and burn them to a CD in DAO mode
+#
+# $Id: burn-shns 82 2004-02-14 04:36:45Z cepstein $
+
+set -e
+
+# BURN_DIR environment variable sets where .wav files are extracted.
+# Default is /var/tmp/burn unless you have it set.
+BURN_DIR=${BURN_DIR:-/var/tmp/burn}
+
+test -d $BURN_DIR || mkdir -p $BURN_DIR
+
+if [ $# -eq 0 ]; then
+    set `pwd`
+fi
+
+cd $BURN_DIR
+
+# Remove any stray .wav, .bin and toc files
+rm -f *.wav toc data.bin
+
+echo "Burning files $@"
+unshn "$@" && time cdrecord -v -pad -dao -eject *.wav
