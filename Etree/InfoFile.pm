@@ -68,7 +68,7 @@ sub word2num {
 # Some regexps we use to recognize certain parts of the text file,
 # mostly taping related
 my $spots = qr/fob|dfc|btp|d?aud|d?sbd|soundboard|on(\s*|-)stage|matrix|
-  mix|balcony|rail|stand/ix;
+  mix|balcony|rail/ix;
 my $mics = qr/caps|omni|cardioid|sc?ho?ep[sz]|neumann|mbho|akg|b&k|dpa|
   audio.technica/ix;
 my $configs = qr/\b(?:ortf|x[-\/]?y|degrees|blumlein|binaural|nos|din)\b/ix;
