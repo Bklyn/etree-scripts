@@ -97,7 +97,7 @@ sub shnlen {
    open (SHNINFO, "shntool info \Q$file\E 2>/dev/null |") or return;
 
    while (<SHNINFO>) {
-      if (/^length:\s+([\d:]+)/) {
+      if (/^length:\s+([\d:]+)/i) {
 	 $length = $1;
 	 last;
       }
