@@ -3,7 +3,6 @@ ChangeLog
 Etree/InfoFile.pm
 INSTALL
 MANIFEST
-Makefile.PL
 README
 bin/burn-shns
 bin/cdfill
