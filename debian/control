@@ -8,7 +8,7 @@ Standards-Version: 3.6.1
 
 Package: etree-scripts
 Architecture: all
-Depends: ${perl:Depends}, libdigest-md5-perl, libtimedate-perl, libaudio-wav-perl, libhtml-parser-perl
+Depends: ${perl:Depends}, ${misc:Depends}, libdigest-md5-perl, libtimedate-perl, libaudio-wav-perl, libhtml-parser-perl
 Recommends: shorten, shntool, flac, cdrecord, lame
 Description: Useful scripts for handling lossless audio files.
  Contains a number of handy utility scripts for dealing with

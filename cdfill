@@ -7,7 +7,7 @@
 #
 # Author: Caleb Epstein <cae at bklyn dot org>
 #
-# $Id: cdfill 120 2005-06-03 04:59:29Z cepstein $
+# $Id$
 
 
 use Getopt::Long;

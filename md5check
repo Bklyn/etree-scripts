@@ -6,7 +6,7 @@
 #
 # Author: Caleb Epstein <cae at bklyn dot org>
 #
-# $Id: md5check 149 2007-12-18 16:02:01Z cepstein $
+# $Id$
 
 use strict;
 use File::Find;
@@ -462,7 +462,7 @@ there were both errors and missing files, the exit status will be 3
 
 =head1 VERSION
 
-$Id: md5check 149 2007-12-18 16:02:01Z cepstein $
+$Id$
 
 =head1 SEE ALSO
 

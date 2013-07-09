@@ -4,7 +4,7 @@
 # current directory of WAV files or from a list of WAV files on the
 # command line
 #
-# $Id: make-toc 12 2002-09-26 13:51:59Z cepstein $
+# $Id$
 
 use File::Find;
 

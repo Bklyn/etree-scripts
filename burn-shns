@@ -4,7 +4,7 @@
 #
 # Take a directory of SHN/FLAC files and burn them to a CD in DAO mode
 #
-# $Id: burn-shns 82 2004-02-14 04:36:45Z cepstein $
+# $Id$
 
 set -e
 

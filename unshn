@@ -11,7 +11,7 @@
 #
 # Author: Caleb Epstein <cae at bklyn dot org>
 #
-# $Id: unshn 142 2005-07-22 15:31:23Z cepstein $
+# $Id$
 
 use strict;
 use File::Basename;
@@ -24,7 +24,7 @@ my $progname = basename $0;
 my $shnlen = 1;
 my $shnfix = 0;
 my $rmfixed = 1;
-(my $version = '$Revision: 142 $') =~ s/(^.Revision:\s+|\s+\$)//g;
+(my $version = '$Revision$') =~ s/(^.Revision:\s+|\s+\$)//g;
 my $debug = 0;
 
 sub usage {

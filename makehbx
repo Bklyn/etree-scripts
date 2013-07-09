@@ -15,7 +15,7 @@
 # changes back to the author at <cae at bklyn dot org>.  I'd like this
 # to always be the latest and greatest version.
 #
-# $Id: makehbx 55 2004-02-09 18:10:43Z cepstein $
+# $Id$
 
 use strict;
 use Getopt::Long;
@@ -30,7 +30,7 @@ use Etree::InfoFile;
 $File::Find::dont_use_nlink = 1; # Incase this is smbfs or whatever
 
 my $progname = basename $0;
-my $version = '$Revision: 55 $ ';
+my $version = '$Revision$ ';
 $version =~ s/^.Revision:\s+//; $version =~ s/\s*\$\s*$//;
 my $debug = 0;
 my $writefiles = 0;

@@ -11,7 +11,7 @@
 #
 # http://bklyn.org/~cae/shn2mp3
 #
-# $Id: shn2mp3 142 2005-07-22 15:31:23Z cepstein $
+# $Id$
 
 use strict;
 use Getopt::Long;
@@ -36,7 +36,7 @@ $File::Find::dont_use_nlink = 1; # Incase this is smbfs or whatever
 
 my %BANDS;
 (my $progname = basename $0) =~ s/\.pl$//;
-(my $version = q$Revision: 142 $) =~ s/^Revision: ([\d\.]+).*/$1/;
+(my $version = q$Revision$) =~ s/^Revision: ([\d\.]+).*/$1/;
 my $debug = 0;
 my $writefiles = 0;
 my $force = 0;
@@ -92,7 +92,7 @@ sub shnlen {
    open (SHNINFO, "shntool info \Q$file\E 2>/dev/null |") or return;
 
    while (<SHNINFO>) {
-      if (/^length:\s+([\d:]+)/) {
+      if (/^length:\s+([\d:]+)/i) {
 	 $length = $1;
 	 last;
       }
@@ -333,8 +333,7 @@ sub lossless_to_lossy {
    if ($info->venue) {
       $album .= " " . $info->venue;
    }
-
-   my $year = $info->year;
+   my $year = substr ($info->date || "0000", 0, 4);
    my $comment = $info->source || "Encoded by $progname";
    my $tracktime = $song->{Time} || shnlen ($file) || "0:00";
    my $tracksecs = parsetime ($tracktime);
@@ -416,9 +415,10 @@ sub lossless_to_lossy {
 
       print " " x 14;
       if ($tracksecs and $encodetime) {
-	 printf "Encode speed %.1fx", $tracksecs / $encodetime;
+	 print "Encode speed " .
+	   sprintf ("%.1fx", $tracksecs / $encodetime);
       } else {
-	 printf "File size %s", bytes_to_human (-s $outfile);
+	 print "File size " . bytes_to_human (-s $outfile);
 	 if ($skip) {
 	    print ", created " .
 	      strftime ("%m/%d/%y %H:%M", localtime ((stat $outfile)[10]));
@@ -603,7 +603,7 @@ the information found by the L<Etree::InfoFile> module.
 
 =head1 VERSION
 
-$Id: shn2mp3 142 2005-07-22 15:31:23Z cepstein $
+$Id$
 
 =head1 SEE ALSO
 

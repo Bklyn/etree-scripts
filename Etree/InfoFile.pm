@@ -2,7 +2,7 @@
 #
 # Live concert recording info file parsing module
 #
-# $Id: InfoFile.pm 146 2007-07-23 20:52:50Z cepstein $
+# $Id$
 
 
 =head1 NAME
@@ -39,7 +39,7 @@ my $have_locale = not $@;
 eval "use Date::Parse";
 my $have_date_parse = not $@;
 
-(my $REV = q$Revision: 146 $) =~ s/^Revision:\s+([\d\.]+)\s.*/$1/;
+(my $REV = q$Revision$) =~ s/^Revision:\s+([\d\.]+)\s.*/$1/;
 my $VERSION = $REV;
 my $debug = 0;
 my $test = 0;
@@ -68,7 +68,7 @@ sub word2num {
 # Some regexps we use to recognize certain parts of the text file,
 # mostly taping related
 my $spots = qr/fob|dfc|btp|d?aud|d?sbd|soundboard|on(\s*|-)stage|matrix|
-  mix|balcony|rail|stand/ix;
+  mix|balcony|rail/ix;
 my $mics = qr/caps|omni|cardioid|sc?ho?ep[sz]|neumann|mbho|akg|b&k|dpa|
   audio.technica/ix;
 my $configs = qr/\b(?:ortf|x[-\/]?y|degrees|blumlein|binaural|nos|din)\b/ix;
@@ -368,8 +368,7 @@ sub parseinfo {
 
       if (not $state->{numsongs} and
 	  (not exists $self->{Band} or
-	   # Try to allow un-dated recordings
-	   # not exists $self->{Date} or
+	   not exists $self->{Date} or
 	   not exists $self->{Venue})) {
 	 print ">BAND/VENUE/DATE<: $para\n" if $self->{Debug};
 	 $self->parseband ($para);
@@ -725,7 +724,7 @@ __END__
 
 =head1 VERSION
 
-$Id: InfoFile.pm 146 2007-07-23 20:52:50Z cepstein $
+$Id$
 
 =head1 SEE ALSO
 

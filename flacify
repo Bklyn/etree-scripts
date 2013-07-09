@@ -3,7 +3,7 @@
 # flacify - Convert an etree-compliant directory of SHN (or FLAC)
 # files into a well-tagged set of FLAC files.
 #
-# $Id: flacify 148 2007-07-24 00:15:48Z cepstein $
+# $Id$
 
 use strict;
 use File::Basename;
@@ -20,8 +20,8 @@ use POSIX qw(strftime);
 use Text::Wrap;
 
 my $progname = basename $0;
-my $rcsid = q$Id: flacify 148 2007-07-24 00:15:48Z cepstein $;
-(my $version = q$Revision: 148 $) =~ s/^Revision:\s+([\d\.]+)\s.*/$1/;
+my $rcsid = q$Id$;
+(my $version = q$Revision$) =~ s/^Revision:\s+([\d\.]+)\s.*/$1/;
 my $debug = 0;
 my $dryrun = 0;
 my $tagdiscs = 0;
@@ -428,6 +428,16 @@ sub convert_files {
       finddepth (sub { rmdir if -d }, $dir);
    }
 
+   # Rename the directory to have a .flac16 extension
+   (my $newdir = $dir) =~ s/\.(wav|shn|flac\d*)f?$//ig;
+   $newdir .= ".flac16";
+
+   if (not $dryrun and $newdir ne $dir) {
+      logmsg ("Renaming $dir -> $newdir");
+      chdir ("..") or die "Unable to chdir: $!\n";
+      rename ($dir, $newdir) or die "Rename failed: $!\n";
+   }
+
    logmsg ("Done processing $dir");
 
    1;
@@ -820,7 +830,7 @@ Redirect all output messages to this file.  Helpful for debugging.
 
 =head1 VERSION
 
-$Id: flacify 148 2007-07-24 00:15:48Z cepstein $
+$Id$
 
 =head1 SEE ALSO
 

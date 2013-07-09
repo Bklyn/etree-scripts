@@ -2,7 +2,7 @@
 #
 # MakeMaker script for etree-scripts
 #
-# $Id: Makefile.PL 147 2007-07-23 21:32:37Z cepstein $
+# $Id$
 
 use ExtUtils::MakeMaker;
 
