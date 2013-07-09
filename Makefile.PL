@@ -15,7 +15,7 @@ WriteMakefile (
 
 	       EXE_FILES => [ "md5check", "unshn", "burn-shns",
 			      "cdfill", "makehbx", "shn2mp3", "shn2ogg",
-			      "make-toc", "flacify" ],
+			      "make-toc", "flacify", "parseinfo" ],
 
 	       PREREQ_PM => { "Date::Parse" => 0,
 			      "HTML::Entities" => 0,
