@@ -1,9 +1,7 @@
-.cvsignore
 Build.PL
 burn-shns
 cdfill
 ChangeLog
-debian/.cvsignore
 debian/changelog
 debian/compat
 debian/control
