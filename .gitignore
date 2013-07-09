@@ -1,10 +1,10 @@
-*~
 *-stamp
+*~
 .cvsignore
 .svn
 Build
+MYMETA.*
 Makefile
 _build
 blib
-maybe-Build.PL
 pm_to_blib

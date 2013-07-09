@@ -1,47 +1,23 @@
-CYGWIN USERS
+INSTALLATION
 
-There is now a single, self-contained package file available for
-Cygwin users.  All you need is a basic Cygwin installation with Perl
-installed.  Once you have this, download the
-etree-scripts-<version>.cygwin.tar.gz file from Sourceforge
-(http://etree-scripts.sourceforge.net/), and type:
+Installing etree-scripts should be as simple as:
 
-	% cd /
-	% tar xfz /path/to/etree-scripts-<version>.cygwin.tar.gz
+	# Create the Build script
+	% perl Build.PL	 
 
-And everything you need will be installed and ready to use.  You can
-try getting started by typing "perldoc flacify" or "perldoc shn2mp3".
+	# Install any missing prerequisites (Date::Parse, Audio::Wav, etc.)
 
-PREREQUISITES
+	% ./Build installdeps
 
-For regular UNIX systems, you can install etree-scripts like any other
-Perl package.  First, though, you should install these Perl modules:
+	# Install etree-scripts
+	% ./Build install
 
-	Date::Parse 	Optional, but formatting and parsing of dates will
-			be sub-optimal without it.
+You can specify options to your hearts content if you know your way
+around the Perl Module::Build toolset.  If you're installing on a UNIX
+system you may need to run "sudo ./Build ..." to handle the
+installation steps.
 
-	Audio::Wav	Optional.  Used by "unshn" to detect SBEs and
-			non-CD-DA audio files.
-
-	HTML::Parser	Required for the "makehbx" script.  See
-			http://catchen.org/hillsboro/ for more info on
-			HBX.
-
-To install these Perl modules, you can generally just type:
-
-	% cpan
-	<answer any setup questions the first time thru>
-
-	cpan> install Date::Parse
-	<output>
-
-	cpan> install HTML::Parser
-
-and so on.  If you're using a package-based system like Debian or
-RedHat Linux, these modules are probably available as installable
-packages.  You may need to do a little digging to find them.  For
-example, the libtime-date-perl package on Debian has the Date::Time
-module.
+ADDITIONAL TOOLS
 
 You'll also need the following command line tools:
 
@@ -64,15 +40,17 @@ You'll also need the following command line tools:
 			files using shn2ogg you will need this.
 			http://www.xiph.org/ogg/vorbis/
 
-INSTALLATION
+CYGWIN USERS
 
-Once you have the pre-requisites, installing etree-scripts is as
-simple as:
+There is now (or was) a single, self-contained package file available
+for Cygwin users.  All you need is a basic Cygwin installation with
+Perl installed.  Once you have this, download the
+etree-scripts-<version>.cygwin.tar.gz file from Sourceforge
+(http://etree-scripts.sourceforge.net/), and type:
 
-	% perl Makefile.PL
-	% make
-	% make install
+	% cd /
+	% tar xfz ~-/etree-scripts-<version>.cygwin.tar.gz
 
-You can specify options to your hearts content if you know your way
-around the Perl MakeMaker toolset.
+And everything you need will be installed and ready to use.  You can
+try getting started by typing "perldoc flacify" or "perldoc shn2mp3".
 
